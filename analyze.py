@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
@@ -13,32 +14,57 @@ STYLE = {
     "ET": ("#e87ba4", "v", "-"),
 }
 CONFIG = ["m1", "m2", "dt_ms", "flux_ratio", "cosi", "sky_mode"]
+LN_B = 4.6
+RHO_REF = 20.0
+RHO_CAP = 1e3
 FIG_WIDTH = 7.1
-FIG_HEIGHT = 2.6
+PANEL_HEIGHT = 1.9
+METRICS = {
+    "rho_false": r"$\rho_{\rm false}$",
+    "rho_crit": r"$\rho_{\rm crit}$",
+}
+
+
+def add_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    gain = df["ff_precessing"] ** 2 - df["ff_aligned"] ** 2
+    loss = 1.0 - df["ff_precessing"] ** 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho_false = np.where(gain > 0, np.sqrt(2 * LN_B / gain), np.inf)
+        rho_crit = np.where(loss > 0, np.sqrt(2 * LN_B / loss), np.inf)
+    df = df.assign(
+        absorbed=df["ff_precessing"] - df["ff_aligned"],
+        rho_false=rho_false,
+        rho_crit=rho_crit,
+        false_lnl_ref=0.5 * RHO_REF**2 * gain,
+    )
+    ref = df[df["network"] == "HL"].set_index([*CONFIG, "isky"])[["rho_false", "rho_crit"]]
+    df = df.join(ref.add_suffix("_hl"), on=[*CONFIG, "isky"])
+    return df.assign(
+        false_ratio_to_hl=df["rho_false"] / df["rho_false_hl"],
+        crit_ratio_to_hl=df["rho_crit"] / df["rho_crit_hl"],
+    )
 
 
 def summarise(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.assign(absorbed=df["ff_precessing"] - df["ff_aligned"])
-    ref = df[df["network"] == "HL"].set_index([*CONFIG, "isky"])["rho_crit_precessing"]
-    df = df.join(ref.rename("rho_crit_hl"), on=[*CONFIG, "isky"])
-    df["ratio_to_hl"] = df["rho_crit_precessing"] / df["rho_crit_hl"]
     grouped = df.groupby([*CONFIG, "network"])
     return grouped.agg(
-        rho_crit_median=("rho_crit_precessing", "median"),
-        rho_crit_p10=("rho_crit_precessing", lambda s: s.quantile(0.1)),
-        rho_crit_p90=("rho_crit_precessing", lambda s: s.quantile(0.9)),
-        ratio_to_hl_median=("ratio_to_hl", "median"),
+        n_fringes=("n_fringes", "median"),
         ff_aligned_median=("ff_aligned", "median"),
         ff_precessing_median=("ff_precessing", "median"),
         absorbed_median=("absorbed", "median"),
+        false_lnl_ref_median=("false_lnl_ref", "median"),
+        rho_false_median=("rho_false", "median"),
+        false_ratio_to_hl_median=("false_ratio_to_hl", "median"),
+        rho_crit_median=("rho_crit", "median"),
+        rho_crit_p10=("rho_crit", lambda s: s.quantile(0.1)),
+        rho_crit_p90=("rho_crit", lambda s: s.quantile(0.9)),
+        crit_ratio_to_hl_median=("crit_ratio_to_hl", "median"),
         snr_dref_median=("snr_dref", "median"),
-        d_crit_mpc_median=("d_crit_mpc", "median"),
-        n_fringes=("n_fringes", "median"),
         n_sky=("isky", "count"),
     ).reset_index()
 
 
-def plot(table: pd.DataFrame, outbase: Path) -> None:
+def plot(table: pd.DataFrame, metric: str, outbase: Path) -> None:
     plt.rcParams.update(
         {
             "font.size": 10,
@@ -53,22 +79,40 @@ def plot(table: pd.DataFrame, outbase: Path) -> None:
             "pdf.fonttype": 42,
         },
     )
-    panels = table[["dt_ms", "flux_ratio"]].drop_duplicates().sort_values(["dt_ms", "flux_ratio"])
-    fig, axes = plt.subplots(1, len(panels), figsize=(FIG_WIDTH, FIG_HEIGHT), sharey=True, squeeze=False)
-    for ax, (_, panel) in zip(axes[0], panels.iterrows()):
-        sub = table[(table["dt_ms"] == panel["dt_ms"]) & (table["flux_ratio"] == panel["flux_ratio"])]
-        for net in NETWORK_ORDER:
-            rows = sub[sub["network"] == net].sort_values("cosi")
-            if rows.empty:
-                continue
-            color, marker, ls = STYLE[net]
-            ax.plot(rows["cosi"], rows["rho_crit_median"], ls, marker=marker, color=color, label=net)
-        ax.set_yscale("log")
-        ax.set_title(f"$\\Delta t$ = {panel['dt_ms']:g} ms, $I$ = {panel['flux_ratio']:g}", fontsize=10)
-        ax.set_xlabel(r"$\cos\iota$")
-    axes[0][0].set_ylabel(r"$\rho_{\rm crit}$ (median over sky)")
+    dts = sorted(table["dt_ms"].unique())
+    fluxes = sorted(table["flux_ratio"].unique())
+    fig, axes = plt.subplots(
+        len(fluxes),
+        len(dts),
+        figsize=(FIG_WIDTH, PANEL_HEIGHT * len(fluxes) + 0.6),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    column = f"{metric}_median"
+    for i, flux in enumerate(fluxes):
+        for j, dt in enumerate(dts):
+            ax = axes[i][j]
+            sub = table[(table["dt_ms"] == dt) & (table["flux_ratio"] == flux)]
+            for net in NETWORK_ORDER:
+                rows = sub[sub["network"] == net].sort_values("cosi")
+                if rows.empty:
+                    continue
+                color, marker, ls = STYLE[net]
+                values = np.minimum(rows[column], RHO_CAP)
+                ax.plot(rows["cosi"], values, ls, marker=marker, color=color, label=net)
+            ax.set_yscale("log")
+            if i == 0:
+                fringes = sub["n_fringes"].median()
+                ax.set_title(f"$\\Delta t$ = {dt:g} ms ({fringes:.1f} fringes)", fontsize=10)
+            if j == len(dts) - 1:
+                ax.text(1.02, 0.5, f"$I$ = {flux:g}", transform=ax.transAxes, rotation=90, va="center")
+            if i == len(fluxes) - 1:
+                ax.set_xlabel(r"$\cos\iota$")
+            if j == 0:
+                ax.set_ylabel(METRICS[metric])
     axes[0][-1].legend(frameon=False, loc="best")
-    fig.subplots_adjust(left=0.08, right=0.99, bottom=0.18, top=0.88, wspace=0.08)
+    fig.subplots_adjust(left=0.08, right=0.95, bottom=0.1, top=0.93, wspace=0.08, hspace=0.12)
     fig.savefig(outbase.with_suffix(".pdf"))
     fig.savefig(outbase.with_suffix(".png"), dpi=200)
     plt.close(fig)
@@ -80,24 +124,21 @@ def main() -> None:
     parser.add_argument("--outdir", type=Path, default=None)
     args = parser.parse_args()
     outdir = args.outdir or args.csv.parent
-    df = pd.read_csv(args.csv)
+    df = add_metrics(pd.read_csv(args.csv))
     table = summarise(df)
     table.to_csv(outdir / f"{args.csv.stem}_summary.csv", index=False)
-    for sky_mode, sub in table.groupby("sky_mode"):
-        plot(sub, outdir / f"{args.csv.stem}_rho_crit_{sky_mode}")
-    cols = [
-        "dt_ms",
-        "flux_ratio",
-        "cosi",
-        "network",
-        "n_fringes",
-        "ff_aligned_median",
-        "ff_precessing_median",
-    ]
-    cols += ["absorbed_median", "rho_crit_median", "ratio_to_hl_median", "d_crit_mpc_median", "n_sky"]
+    for (m1, m2, sky_mode), sub in table.groupby(["m1", "m2", "sky_mode"]):
+        for metric in METRICS:
+            plot(sub, metric, outdir / f"{args.csv.stem}_{metric}_{m1:g}_{m2:g}_{sky_mode}")
+    cols = ["m1", "m2", "dt_ms", "flux_ratio", "cosi", "network", "n_fringes", "absorbed_median"]
+    cols += ["false_lnl_ref_median", "rho_false_median", "false_ratio_to_hl_median"]
+    cols += ["rho_crit_median", "crit_ratio_to_hl_median", "n_sky"]
     print(table[cols].to_string(index=False, float_format=lambda v: f"{v:.4g}"))
     print(
         f"\n{len(df)} rows; slowest task {df['seconds'].max():.0f} s, median {df['seconds'].median():.0f} s"
+    )
+    print(
+        f"false_lnl_ref = 0.5 * {RHO_REF:g}^2 * (FF_prec^2 - FF_aligned^2); rho_* capped at {RHO_CAP:g} on plots"
     )
 
 

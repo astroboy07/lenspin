@@ -12,17 +12,26 @@ from fit import Problem, run_problem
 
 PRESETS = {
     "pilot": {
-        "sources": [(100.0, 80.0)],
-        "dts_ms": [5.0, 20.0],
+        "source_dts": [((100.0, 80.0), [5.0, 20.0])],
         "flux_ratios": [0.3, 0.9],
         "cosi": [0.9, 0.5, 0.0],
         "nsky": 6,
         "networks": ["H", "HL", "HLV", "HLVI", "ET"],
         "sky_modes": ["free"],
     },
+    "trimmed": {
+        "source_dts": [((30.0, 30.0), [3.0, 6.0, 12.0]), ((100.0, 80.0), [9.0, 19.0, 38.0])],
+        "flux_ratios": [0.1, 0.3, 0.6, 0.9],
+        "cosi": [0.9, 0.7, 0.5, 0.3, 0.0],
+        "nsky": 8,
+        "networks": ["HL", "HLV", "HLVI", "ET"],
+        "sky_modes": ["free"],
+    },
     "full": {
-        "sources": [(30.0, 30.0), (100.0, 80.0)],
-        "dts_ms": [2.0, 5.0, 10.0, 20.0, 50.0],
+        "source_dts": [
+            ((30.0, 30.0), [2.0, 5.0, 10.0, 20.0, 50.0]),
+            ((100.0, 80.0), [2.0, 5.0, 10.0, 20.0, 50.0]),
+        ],
         "flux_ratios": [0.1, 0.3, 0.6, 0.9],
         "cosi": [1.0, 0.9, 0.7, 0.5, 0.3, 0.0],
         "nsky": 12,
@@ -60,15 +69,19 @@ def fibonacci_sky(n: int) -> list[tuple[float, float]]:
 def make_tasks(preset: dict) -> list[dict]:
     sky = fibonacci_sky(preset["nsky"])
     tasks = []
-    for (m1, m2), dt, flux, cosi, isky, net, mode in itertools.product(
-        preset["sources"],
-        preset["dts_ms"],
-        preset["flux_ratios"],
-        preset["cosi"],
-        range(len(sky)),
-        preset["networks"],
-        preset["sky_modes"],
-    ):
+    combos = (
+        ((m1, m2), *rest)
+        for (m1, m2), dts in preset["source_dts"]
+        for rest in itertools.product(
+            dts,
+            preset["flux_ratios"],
+            preset["cosi"],
+            range(len(sky)),
+            preset["networks"],
+            preset["sky_modes"],
+        )
+    )
+    for (m1, m2), dt, flux, cosi, isky, net, mode in combos:
         tasks.append(
             {
                 "m1": m1,
