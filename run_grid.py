@@ -2,6 +2,7 @@ import argparse
 import csv
 import itertools
 import time
+import traceback
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -105,7 +106,11 @@ def run_task(args: tuple) -> dict:
         task["network"],
         task["sky_mode"] == "free",
     )
-    row = run_problem(problem, seed, popsize, maxiter)
+    try:
+        row = run_problem(problem, seed, popsize, maxiter)
+    except Exception:  # noqa: BLE001
+        print(f"task failed: {task}\n{traceback.format_exc()}", flush=True)
+        return None
     return {**task, **row, "seconds": time.perf_counter() - t0}
 
 
@@ -142,7 +147,10 @@ def main() -> None:
         writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         if new_file:
             writer.writeheader()
+            fh.flush()
         for n, row in enumerate(pool.imap_unordered(run_task, todo), 1):
+            if row is None:
+                continue
             writer.writerow(row)
             fh.flush()
             elapsed = time.perf_counter() - t_start

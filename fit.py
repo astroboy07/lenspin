@@ -20,6 +20,7 @@ LN_B_THRESHOLD = 4.6
 SNR_FRACTION_BAND = 0.95
 THETA_JN_SCAN = 37
 NM_OPTIONS = {"xatol": 1e-4, "fatol": 1e-7, "maxfev": 3000}
+BOUND_MARGIN = 1e-9
 
 
 @dataclass
@@ -86,7 +87,9 @@ class Problem:
 
 def optimise(objective, bounds, x0, seed, popsize, maxiter):
     lo, hi = np.array(bounds).T
-    x0 = np.clip(x0, lo, hi)
+    # differential_evolution rescales x0 and rejects a value on a bound that rounds to 1 + 1e-16.
+    margin = BOUND_MARGIN * (hi - lo)
+    x0 = np.clip(x0, lo + margin, hi - margin)
     de = differential_evolution(
         lambda x: 1.0 - objective(x),
         bounds,
