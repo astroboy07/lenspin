@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.optimize import differential_evolution, minimize
+from scipy.optimize import differential_evolution, minimize, minimize_scalar
 
 from network import F_MAX, F_MIN, F_MIN_DEFAULT, Network, aligned_fstat, make_grid, precessing_overlap
 from signals import (
@@ -14,7 +14,7 @@ from signals import (
 )
 
 MCHIRP_RANGE = (0.85, 1.15)
-Q_MIN = 0.25
+Q_MIN = 0.1
 SPIN_MAX = 0.99
 LN_B_THRESHOLD = 4.6
 SNR_FRACTION_BAND = 0.95
@@ -118,7 +118,16 @@ def precessing_start(problem: Problem, x_aligned) -> list[float]:
     base = [mchirp, q, abs(chi1z), 1.0 if chi1z >= 0 else -1.0, chi2z]
     thetas = np.linspace(0.0, np.pi, THETA_JN_SCAN)
     ffs = [problem.ff_precessing([*base, th, 0.0, *sky]) for th in thetas]
-    return [*base, float(thetas[int(np.argmax(ffs))]), 0.0, *sky]
+    step = thetas[1] - thetas[0]
+    best = float(thetas[int(np.argmax(ffs))])
+    res = minimize_scalar(
+        lambda th: -problem.ff_precessing([*base, th, 0.0, *sky]),
+        bounds=(max(best - step, 0.0), min(best + step, np.pi)),
+        method="bounded",
+        options={"xatol": 1e-5},
+    )
+    theta = float(res.x) if -res.fun > max(ffs) else best
+    return [*base, theta, 0.0, *sky]
 
 
 def fit_precessing(problem: Problem, x_aligned, seed: int, popsize: int, maxiter: int):

@@ -4,8 +4,7 @@ import numpy as np
 
 F_REF = 20.0
 D_REF_MPC = 1000.0
-ALIGNED = ls.IMRPhenomXAS
-PRECESSING = ls.IMRPhenomXP
+APPROXIMANT = ls.IMRPhenomXP
 
 
 def chirp_mass(m1: float, m2: float) -> float:
@@ -41,7 +40,7 @@ def fd_polarizations(approximant, m1, m2, spin1, spin2, incl, grid):
 
 
 def aligned_polarizations(m1, m2, chi1z, chi2z, incl, grid):
-    return fd_polarizations(ALIGNED, m1, m2, (0.0, 0.0, chi1z), (0.0, 0.0, chi2z), incl, grid)
+    return fd_polarizations(APPROXIMANT, m1, m2, (0.0, 0.0, chi1z), (0.0, 0.0, chi2z), incl, grid)
 
 
 def precessing_polarizations(x, grid):
@@ -60,7 +59,7 @@ def precessing_polarizations(x, grid):
         F_REF,
         0.0,
     )
-    return fd_polarizations(PRECESSING, m1, m2, spins[:3], spins[3:], incl, grid)
+    return fd_polarizations(APPROXIMANT, m1, m2, spins[:3], spins[3:], incl, grid)
 
 
 def lens_factor(freqs, dt, flux_ratio):
