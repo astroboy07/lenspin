@@ -1,0 +1,13 @@
+{
+ "index": 0,
+ "cosi": 0.9,
+ "isky": 3,
+ "network": "HL",
+ "model": "aligned",
+ "log_evidence": -95.71597405796768,
+ "log_evidence_err": 0.20216594452686928,
+ "log_noise_evidence": -312.67619197094336,
+ "max_log_likelihood": 235.42912982622644,
+ "network_snr": 25.00704668572214,
+ "nlive": 400
+}

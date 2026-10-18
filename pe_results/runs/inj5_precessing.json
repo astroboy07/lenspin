@@ -1,0 +1,13 @@
+{
+ "index": 5,
+ "cosi": 0.5,
+ "isky": 3,
+ "network": "HLVI",
+ "model": "precessing",
+ "log_evidence": -67.9155932097762,
+ "log_evidence_err": 0.3092865333256726,
+ "log_noise_evidence": -236.2307883155114,
+ "max_log_likelihood": 200.65101984681644,
+ "network_snr": 21.73618127986199,
+ "nlive": 400
+}

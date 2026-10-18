@@ -1,0 +1,13 @@
+{
+ "index": 6,
+ "cosi": 0.5,
+ "isky": 0,
+ "network": "HL",
+ "model": "lensed",
+ "log_evidence": -29.48720994601939,
+ "log_evidence_err": 0.24386339015036973,
+ "log_noise_evidence": -202.57233110078798,
+ "max_log_likelihood": 194.42326162734673,
+ "network_snr": 20.12820563789967,
+ "nlive": 400
+}

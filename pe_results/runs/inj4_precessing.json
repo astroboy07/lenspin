@@ -1,0 +1,13 @@
+{
+ "index": 4,
+ "cosi": 0.5,
+ "isky": 3,
+ "network": "HL",
+ "model": "precessing",
+ "log_evidence": -41.3627000225732,
+ "log_evidence_err": 0.1985592424873112,
+ "log_noise_evidence": -103.40973771555348,
+ "max_log_likelihood": 82.77878270444475,
+ "network_snr": 14.381219539076195,
+ "nlive": 400
+}
