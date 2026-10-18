@@ -3,10 +3,11 @@ import time
 
 import numpy as np
 
-from fit import Problem, run_problem
+from fit import PrecessingProblem, Problem, run_problem, run_reverse_problem
 
 CONFIG = {"m1": 100.0, "m2": 80.0, "cosi": 0.5, "psi": 0.3, "ra": 1.0, "dec": 0.4}
 LENS = {"dt": 0.01, "flux_ratio": 0.5}
+PRECESSION = {"chi1": 0.8, "cos_tilt1": 0.0, "chi2z": 0.0, "theta_jn": 1.0, "phi_jl": 0.0}
 TRUTH_TOL = 1e-5
 ORDER_TOL = 1e-4
 
@@ -61,6 +62,43 @@ def main() -> None:
     seeds.append(rows["HL"]["ff_precessing"])
     spread = max(seeds) - min(seeds)
     print(f"[INFO] HL seed spread {spread:.2e} over 3 seeds (target < 1e-3 at production settings)")
+
+    for net in ["HL", "HLVI"]:
+        c, s = CONFIG, PRECESSION
+        p = PrecessingProblem(
+            c["m1"],
+            c["m2"],
+            0.0,
+            1.0,
+            0.0,
+            s["theta_jn"],
+            s["phi_jl"],
+            c["psi"],
+            c["ra"],
+            c["dec"],
+            net,
+            False,
+        )
+        x = [p.mchirp, p.q, 0.0, 0.0]
+        ff_al, ff_le = p.ff_aligned(x), p.ff_lensed([*x, 30.0, 0.0])
+        ok = min(ff_al, ff_le) > 1.0 - TRUTH_TOL
+        results.append(
+            report(f"no-precession truth {net}", ok, f"aligned {ff_al:.7f}, lensed I=0 {ff_le:.7f}")
+        )
+        p = PrecessingProblem(c["m1"], c["m2"], *s.values(), c["psi"], c["ra"], c["dec"], net, False)
+        ff_pr = p.ff_precessing(
+            [p.mchirp, p.q, s["chi1"], s["cos_tilt1"], s["chi2z"], s["theta_jn"], s["phi_jl"]]
+        )
+        results.append(report(f"precessing injection truth {net}", ff_pr > 1.0 - TRUTH_TOL, f"{ff_pr:.7f}"))
+        t0 = time.perf_counter()
+        r = run_reverse_problem(p, 1, args.popsize, args.maxiter)
+        ok = r["ff_lensed"] >= r["ff_aligned"] - ORDER_TOL
+        detail = (
+            f"FF aligned {r['ff_aligned']:.5f}, lensed {r['ff_lensed']:.5f} (dt {r['best_dt_ms']:.1f} ms, "
+            f"I {r['best_flux_ratio']:.2f}), rho_false_lensing {r['rho_false_lensing']:.1f}, "
+            f"{r['nfev']} evals in {time.perf_counter() - t0:.0f} s"
+        )
+        results.append(report(f"lensed >= aligned {net}", ok, detail))
 
     print("ALL PASS" if all(results) else "SOME CHECKS FAILED")
 
