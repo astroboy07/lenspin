@@ -250,7 +250,7 @@ def make_likelihood(model: str, inj: dict, ifos, priors, relative_binning: bool 
     )
 
 
-def run(study: str, index: int, model: str, outdir: Path, npool: int, nlive: int) -> dict:
+def run(study: str, index: int, model: str, outdir: Path, npool: int, nlive: int, seed: int | None = None) -> dict:
     inj = STUDIES[study][index]
     label = f"inj{index}_{model}"
     distance = injection_distance(inj)
@@ -259,7 +259,7 @@ def run(study: str, index: int, model: str, outdir: Path, npool: int, nlive: int
     (outdir / label).mkdir(parents=True, exist_ok=True)
     lookup = outdir / label / "distance_lookup.npz"
     likelihood = make_likelihood(model, inj, ifos, priors, lookup=lookup)
-    sampler = {**SAMPLER, "nlive": nlive}
+    sampler = {**SAMPLER, "nlive": nlive, "seed": seed}
     result = bilby.run_sampler(
         likelihood=likelihood,
         priors=priors,
@@ -284,6 +284,7 @@ def run(study: str, index: int, model: str, outdir: Path, npool: int, nlive: int
         "max_log_likelihood": float(np.max(result.posterior["log_likelihood"])),
         "network_snr": float(np.sqrt(sum(ifo.meta_data["optimal_SNR"] ** 2 for ifo in ifos))),
         "nlive": nlive,
+        "seed": seed,
     }
     (outdir / f"{label}.json").write_text(json.dumps(summary, indent=1))
     return summary
@@ -297,9 +298,10 @@ def main() -> None:
     parser.add_argument("--outdir", type=Path, default=Path("results/pe"))
     parser.add_argument("--npool", type=int, default=16)
     parser.add_argument("--nlive", type=int, default=SAMPLER["nlive"])
+    parser.add_argument("--seed", type=int)
     args = parser.parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
-    print(json.dumps(run(args.study, args.index, args.model, args.outdir, args.npool, args.nlive)))
+    print(json.dumps(run(args.study, args.index, args.model, args.outdir, args.npool, args.nlive, args.seed)))
 
 
 if __name__ == "__main__":
