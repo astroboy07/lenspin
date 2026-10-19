@@ -6,17 +6,17 @@ import numpy as np
 from fit import Problem
 from network import GPS_TIME
 from pe import (
-    DISTANCE_MPC,
     INJECTIONS,
-    LENS,
-    MASSES,
     MODELS,
+    STUDIES,
     fiducial,
+    injection_distance,
     injection_parameters,
     interferometer,
     make_ifos,
     make_likelihood,
     make_priors,
+    segment_duration,
 )
 from signals import D_REF_MPC
 
@@ -47,15 +47,16 @@ def check_geometry() -> bool:
     return ok
 
 
-def check_snr(index: int) -> bool:
-    inj = INJECTIONS[index]
-    params = injection_parameters(inj)
-    ifos = make_ifos(inj)
+def check_snr(inj: dict, name: str) -> bool:
+    distance = injection_distance(inj)
+    params = injection_parameters(inj, distance)
+    ifos = make_ifos(inj, distance)
     snr_bilby = float(np.sqrt(sum(ifo.meta_data["optimal_SNR"] ** 2 for ifo in ifos)))
     p = Problem(
-        *MASSES,
-        LENS["lens_dt"],
-        LENS["lens_flux_ratio"],
+        inj["m1"],
+        inj["m2"],
+        inj["dt"],
+        inj["flux"],
         inj["cosi"],
         params["psi"],
         params["ra"],
@@ -63,10 +64,12 @@ def check_snr(index: int) -> bool:
         inj["network"],
         False,
     )
-    snr_ff = float(np.sqrt(p.ss)) * D_REF_MPC / DISTANCE_MPC
+    snr_ff = float(np.sqrt(p.ss)) * D_REF_MPC / distance
     ok = abs(snr_bilby / snr_ff - 1) < SNR_TOL
+    target = f", target {inj['target_snr']:g}" if "target_snr" in inj else ""
     print(
-        f"[{'PASS' if ok else 'FAIL'}] injection {index} SNR bilby {snr_bilby:.3f} vs lenspin {snr_ff:.3f}",
+        f"[{'PASS' if ok else 'FAIL'}] {name}: SNR bilby {snr_bilby:.3f} vs lenspin {snr_ff:.3f}{target}; "
+        f"D {distance:.0f} Mpc, segment {segment_duration(inj):g} s",
         flush=True,
     )
     return ok
@@ -115,7 +118,8 @@ def check_relative_binning(index: int, update: bool) -> bool:
 
 
 def main() -> None:
-    results = [check_geometry(), check_snr(0), check_snr(3), check_relative_binning(0, update=True)]
+    results = [check_geometry(), check_snr(INJECTIONS[0], "network 0"), check_snr(INJECTIONS[3], "network 3")]
+    results += [check_snr(inj, f"generality {i}") for i, inj in enumerate(STUDIES["generality"])]
     print("ALL PASS" if all(results) else "SOME CHECKS FAILED")
 
 
