@@ -11,6 +11,7 @@ from bilby.gw.source import lal_binary_black_hole, lal_binary_black_hole_relativ
 from network import F_MIN_DEFAULT, GPS_TIME, NETWORKS, PSD_MODELS
 from run_grid import INJECTION_PSI, fibonacci_sky
 from signals import F_REF, chirp_mass, component_masses, lens_factor
+from waveoptics import wave_lens_factor
 
 SAMPLING_FREQUENCY = 2048.0
 APPROXIMANT = "IMRPhenomXP"
@@ -44,6 +45,7 @@ TIME_WINDOW = 0.1
 DISTANCE_RANGE = (300.0, 15000.0)
 RB_EPSILON = 0.025
 PSD_FLOOR = 1.0
+WAVE_F_MIN = 1.0
 SAMPLER = {"sampler": "dynesty", "nlive": 400, "sample": "acceptance-walk", "naccept": 60, "dlogz": 0.1}
 
 
@@ -56,6 +58,21 @@ def lensed_bbh(frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1
     if h is None:
         return None
     factor = lens_factor(frequency_array, lens_dt, lens_flux_ratio)
+    return {k: v * factor for k, v in h.items()}
+
+
+def wave_lensed_bbh(frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2,
+                    phi_jl, theta_jn, phase, lens_dt, lens_flux_ratio, **kwargs):  # fmt: skip
+    """Point-mass wave-optics lensing, used only to inject (the lensed model stays geometric)."""
+    h = lal_binary_black_hole(
+        frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2, phi_jl,
+        theta_jn, phase, **kwargs,
+    )  # fmt: skip
+    if h is None:
+        return None
+    factor = np.ones(len(frequency_array), complex)
+    band = frequency_array >= WAVE_F_MIN
+    factor[band] = wave_lens_factor(frequency_array[band], lens_dt, lens_flux_ratio)
     return {k: v * factor for k, v in h.items()}
 
 
@@ -166,7 +183,7 @@ def make_ifos(inj: dict, distance: float | None = None) -> bilby.gw.detector.Int
     wfg = bilby.gw.WaveformGenerator(
         duration=duration,
         sampling_frequency=SAMPLING_FREQUENCY,
-        frequency_domain_source_model=lensed_bbh,
+        frequency_domain_source_model=wave_lensed_bbh if inj.get("optics") == "wave" else lensed_bbh,
         parameter_conversion=bilby.gw.conversion.convert_to_lal_binary_black_hole_parameters,
         waveform_arguments=waveform_arguments(),
     )
