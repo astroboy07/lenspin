@@ -52,11 +52,23 @@ STUDIES = {
         for dt_ms in (10.5, 12.5, 14.5, 16.5, 20.5)
     ],
 }  # fmt: skip
+HIDDEN_180 = STUDIES["danger"][0]
+HIDDEN_100 = STUDIES["danger"][3]
+SCAN = {round(inj["dt"] * 1e3, 1): inj for inj in STUDIES["scan"]}
+NOISE_SEEDS = (101, 102, 103)
+STUDIES["noise_danger"] = [{**inj, "noise_seed": seed} for inj in (HIDDEN_180, HIDDEN_100) for seed in NOISE_SEEDS]
+STUDIES["noise_scan"] = [{**SCAN[dt], "noise_seed": seed} for dt in (12.5, 14.5) for seed in NOISE_SEEDS]
+STUDIES["inclination"] = [{**inj, "cosi": cosi} for inj in (HIDDEN_180, SCAN[12.5], SCAN[20.5]) for cosi in (0.2, 0.95)]
+STUDIES["waveform"] = [{**inj, "approximant": "IMRPhenomXO4a"} for inj in (HIDDEN_180, SCAN[10.5], SCAN[20.5])]
 STUDY_MODELS = {
     "network": ("precessing", "lensed", "aligned"),
     "generality": ("precessing", "aligned"),
     "danger": ("precessing", "lensed", "aligned"),
     "scan": ("precessing", "aligned"),
+    "noise_danger": ("lensed", "aligned"),
+    "noise_scan": ("precessing", "aligned"),
+    "inclination": ("precessing", "aligned"),
+    "waveform": ("precessing", "aligned"),
 }
 INJECTIONS = STUDIES["network"]
 MODELS = ("aligned", "precessing", "lensed")
