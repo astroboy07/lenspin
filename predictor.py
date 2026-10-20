@@ -40,6 +40,10 @@ AT_FIXED_Q = (0, 2, 3, 4, 5)
 LENSED_AT_FIXED_Q = (0, 2, 3, 4, 5, 6, 7)
 PROFILE_Q = np.unique(np.concatenate([np.geomspace(Q_MIN, 0.5, 14), np.linspace(0.5, 1.0, 15)]))
 PROFILE_STARTS = 6
+CONTINUATION_GAP = 5.0
+CONTINUATION_SWEEPS = 3
+CONTINUATION_STEP = 0.02
+SAME_MODE_D2 = 4.0
 POSTERIOR_SAMPLES = 40_000
 LOW_Q_MODE = {"mchirp": 62.0, "q": 0.5, "chi_eff": -0.4}
 IS_SAMPLES = 8000
@@ -465,34 +469,77 @@ def compare(outdir: Path, study: str, indices: list[int], optics: str, workers: 
 
 
 def profile_task(task: tuple) -> list[dict]:
-    study, index, optics, kind, q, starts = task
+    study, index, optics, kind, starts = task
     model = cached_model(study, index, "xp", optics)
-    return [{"index": index, **row} for row in conditional_solutions(model, model.lensed, q, starts, kind)]
+    return [{"index": index, **row} for row in profile_cell(model, model.lensed, starts, kind, PROFILE_Q)]
 
 
-def conditional_solutions(model: Model, data: np.ndarray, q: float, starts: tuple, kind: str) -> list[dict]:
-    """Conditional fits at fixed q, each with its Laplace evidence (aligned or lensed template)."""
-    eta = q / (1 + q) ** 2
-    found = []
-    if kind == "lensed":
-        lam = model.clip(np.array([model.truth[0], eta, 0.0, 0, 0, 0, *model.lens_truth]))
-        found.append(model.fit(data, model.align(data, lam), free=LENSED_AT_FIXED_Q))
-        free = LENSED_AT_FIXED_Q
-    else:
-        for chi in starts:
-            lam = model.clip(np.array([model.best_log_mchirp(data, eta, chi), eta, chi, 0, 0, 0]))
-            lam, loglike = model.fit(data, model.align(data, lam), free=AT_FIXED_Q)
-            if not any(abs(lam[0] - f[0]) < 1e-3 and abs(lam[2] - f[2]) < 1e-3 for f, _ in found):
-                found.append((lam, loglike))
-        free = AT_FIXED_Q
+def fixed_q_fit(model: Model, data: np.ndarray, q: float, start: np.ndarray, free: tuple) -> tuple[np.ndarray, float]:
+    lam = start.copy()
+    lam[1] = q / (1 + q) ** 2
+    return model.fit(data, model.align(data, model.clip(lam)), free=free)
+
+
+def same_mode(terms: dict, lam: np.ndarray, kept: tuple) -> bool:
+    """Within two conditional sigmas of a kept solution in (log_mchirp, chi)."""
+    other_terms, other = kept
+    cov = np.array([[other_terms["var_log_mchirp"], other_terms["cov_log_mchirp_chi"]],
+                    [other_terms["cov_log_mchirp_chi"], other_terms["var_chi"]]])  # fmt: skip
+    delta = np.array([lam[0] - other[0], lam[2] - other[2]])
+    return float(delta @ np.linalg.solve(cov, delta)) < SAME_MODE_D2
+
+
+def profile_cell(model: Model, data: np.ndarray, starts: tuple, kind: str, q_grid: np.ndarray) -> list[dict]:
+    """Fixed-q fits over the q grid with Laplace evidences (aligned or lensed template).
+
+    Each q is first fitted from the global starts. Then, sweeping up and down the grid, any q whose best
+    fit is worse than its neighbour's by more than CONTINUATION_GAP is refitted by following the neighbour's
+    best solution in q steps of at most CONTINUATION_STEP, so a branch found at one q is tracked to the next.
+    Solutions within two sigmas of a better one are merged.
+    """
+    free = LENSED_AT_FIXED_Q if kind == "lensed" else AT_FIXED_Q
+    grid = [float(q) for q in q_grid]
+    found = {}
+    for q in grid:
+        eta = q / (1 + q) ** 2
+        if kind == "lensed":
+            seeds = [np.array([model.truth[0], eta, 0.0, 0, 0, 0, *model.lens_truth])]
+        else:
+            seeds = [np.array([model.best_log_mchirp(data, eta, chi), eta, chi, 0, 0, 0]) for chi in starts]
+        found[q] = [fixed_q_fit(model, data, q, seed, free) for seed in seeds]
+    for _ in range(CONTINUATION_SWEEPS):
+        changed = False
+        for order in (grid, grid[::-1]):
+            for prev, q in zip(order[:-1], order[1:]):
+                seed, seed_loglike = max(found[prev], key=lambda x: x[1])
+                here = max(loglike for _, loglike in found[q])
+                if seed_loglike - here > CONTINUATION_GAP:
+                    lam = seed
+                    steps = max(2, int(np.ceil(abs(q - prev) / CONTINUATION_STEP)))
+                    for sub in np.linspace(prev, q, steps + 1)[1:]:
+                        lam, loglike = fixed_q_fit(model, data, float(sub), lam, free)
+                    if loglike > here:
+                        found[q].append((lam, loglike))
+                        changed = True
+        if not changed:
+            break
     rows = []
-    for lam, _ in found:
-        terms = model.laplace_terms(data, lam, free)
-        rows.append({
-            "kind": kind, **terms, "q": q, "log_mchirp": lam[0], "tc": lam[3], "phic": lam[4], "log_amp": lam[5],
-            "lens_dt": lam[6] if kind == "lensed" else np.nan, "lens_flux": lam[7] if kind == "lensed" else np.nan,
-            "log_z": log_z_from(terms),
-        })  # fmt: skip
+    for q in grid:
+        kept = []
+        for lam, _ in sorted(found[q], key=lambda x: -x[1]):
+            try:
+                terms = model.laplace_terms(data, lam, free)
+            except np.linalg.LinAlgError:
+                continue
+            if any(same_mode(terms, lam, k) for k in kept):
+                continue
+            kept.append((terms, lam))
+        for terms, lam in kept:
+            rows.append({
+                "kind": kind, **terms, "q": q, "log_mchirp": lam[0], "tc": lam[3], "phic": lam[4],
+                "log_amp": lam[5], "lens_dt": lam[6] if kind == "lensed" else np.nan,
+                "lens_flux": lam[7] if kind == "lensed" else np.nan, "log_z": log_z_from(terms),
+            })  # fmt: skip
     return rows
 
 
@@ -533,7 +580,7 @@ def profile(table: pd.DataFrame, fits: pd.DataFrame, study: str, optics: str,
     for index, group in fits.groupby("index"):
         modes = group.sort_values("loglike", ascending=False).round({"chi_eff": 2}).drop_duplicates("chi_eff")
         starts = tuple(modes["chi_eff"].head(PROFILE_STARTS))
-        tasks += [(study, index, optics, kind, float(q), starts) for q in PROFILE_Q for kind in ("aligned", "lensed")]
+        tasks += [(study, index, optics, kind, starts) for kind in ("aligned", "lensed")]
     with ProcessPoolExecutor(workers) as pool:
         solutions = pd.DataFrame([row for rows in pool.map(profile_task, tasks, chunksize=1) for row in rows])
     summary = []

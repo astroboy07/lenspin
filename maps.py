@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from predictor import Model, conditional_solutions, laplace_posterior, log_z_from, q_weights, summary_of
+from predictor import Model, laplace_posterior, log_z_from, profile_cell, q_weights, summary_of
 
 REFERENCE_SNR = 25.0
 SNRS = (8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 35.0, 50.0)
@@ -52,10 +52,7 @@ def run_cell(cell: dict) -> tuple[list[dict], list[dict]]:
     fits.sort(key=lambda x: -x[0])
     best = fits[0][1]
     chis = list(dict.fromkeys(round(float(lam[2]), 2) for _, lam in fits))[:MAX_STARTS]
-    solutions = []
-    for q in MAP_Q:
-        solutions += conditional_solutions(model, data, float(q), tuple(chis), "aligned")
-        solutions += conditional_solutions(model, data, float(q), (), "lensed")
+    solutions = profile_cell(model, data, tuple(chis), "aligned", MAP_Q) + profile_cell(model, data, (), "lensed", MAP_Q)
     sol = pd.DataFrame(solutions).assign(**cell)
     aligned_all, lensed_all = sol[sol["kind"] == "aligned"], sol[sol["kind"] == "lensed"]
     misfit = 0.5 * REFERENCE_SNR**2 - lensed_all["loglike"].max()
