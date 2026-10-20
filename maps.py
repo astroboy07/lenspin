@@ -24,9 +24,10 @@ MAX_STARTS = 4
 KEYS = ("total_mass", "q_true", "dt_ms", "flux", "optics")
 
 
-def cells() -> list[dict]:
+def cells(masses: tuple = TOTAL_MASSES, dt_step: float = 1.0) -> list[dict]:
     """Lightest systems first, so the slowest cells start early."""
-    grid = itertools.product(TOTAL_MASSES, TRUE_Q, OPTICS, FLUXES, DT_MS)
+    delays = DT_MS[:: max(1, round(dt_step))]
+    grid = itertools.product(sorted(masses), TRUE_Q, OPTICS, FLUXES, delays)
     return [dict(zip(("total_mass", "q_true", "optics", "flux", "dt_ms"), (m, q, o, f, round(float(t), 3))))
             for m, q, o, f, t in grid]  # fmt: skip
 
@@ -81,13 +82,15 @@ def main() -> None:
     parser.add_argument("--outdir", type=Path, default=Path("results/maps"))
     parser.add_argument("--workers", type=int, default=150)
     parser.add_argument("--limit", type=int, help="run only the first N cells (timing)")
+    parser.add_argument("--masses", type=float, nargs="*", default=list(TOTAL_MASSES))
+    parser.add_argument("--dt-step", type=float, default=1.0, help="keep every n-th delay of DT_MS")
     args = parser.parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
     summary_path, solutions_path = args.outdir / "cells.csv", args.outdir / "solutions.csv"
     done = set()
     if summary_path.exists():
         done = {tuple(r) for r in pd.read_csv(summary_path)[list(KEYS)].drop_duplicates().itertuples(index=False)}
-    todo = [c for c in cells() if tuple(c[k] for k in KEYS) not in done][: args.limit]
+    todo = [c for c in cells(tuple(args.masses), args.dt_step) if tuple(c[k] for k in KEYS) not in done][: args.limit]
     print(f"{len(todo)} cells to run ({len(done)} already done)", flush=True)
     with ProcessPoolExecutor(args.workers) as pool:
         futures = {pool.submit(run_cell, c): c for c in todo}
