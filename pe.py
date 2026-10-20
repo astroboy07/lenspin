@@ -19,6 +19,7 @@ NSKY = 6
 D_REF_MPC = 1000.0
 MIN_DURATION = 4.0
 POST_TRIGGER = 2.0
+WIDE_DISTANCE = (300.0, 40000.0)
 STUDIES = {
     "network": [
         {"m1": 100.0, "m2": 80.0, "dt": 0.02, "flux": 0.3, "cosi": cosi, "isky": isky, "network": net,
@@ -34,8 +35,29 @@ STUDIES = {
         for dt_ms in dts
         for flux in (0.1, 0.3, 0.6)
     ],
+    "danger": [
+        {"m1": m1, "m2": m2, "dt": dt_ms * 1e-3, "flux": flux, "optics": optics, "cosi": 0.7, "isky": 0,
+         "network": "HL", "target_snr": 10.0, "mchirp_span": (0.4, 1.6), "distance_range": WIDE_DISTANCE}
+        for m1, m2, dt_ms, flux, optics in (
+            (120.0, 60.0, 18.5, 0.35, "geometric"),
+            (120.0, 60.0, 18.5, 0.35, "wave"),
+            (90.0, 90.0, 18.5, 0.35, "geometric"),
+            (200.0 / 3.0, 100.0 / 3.0, 5.5, 0.6, "geometric"),
+            (30.0, 30.0, 3.5, 0.6, "geometric"),
+        )
+    ],
+    "scan": [
+        {"m1": 90.0, "m2": 90.0, "dt": dt_ms * 1e-3, "flux": 0.35, "cosi": 0.7, "isky": 0, "network": "HL",
+         "target_snr": 25.0, "mchirp_span": (0.4, 1.6), "distance_range": WIDE_DISTANCE}
+        for dt_ms in (10.5, 12.5, 14.5, 16.5, 20.5)
+    ],
 }  # fmt: skip
-STUDY_MODELS = {"network": ("precessing", "lensed", "aligned"), "generality": ("precessing", "aligned")}
+STUDY_MODELS = {
+    "network": ("precessing", "lensed", "aligned"),
+    "generality": ("precessing", "aligned"),
+    "danger": ("precessing", "lensed", "aligned"),
+    "scan": ("precessing", "aligned"),
+}
 INJECTIONS = STUDIES["network"]
 MODELS = ("aligned", "precessing", "lensed")
 Q_MIN = 0.05
@@ -202,7 +224,7 @@ def make_priors(model: str, inj: dict) -> bilby.gw.prior.BBHPriorDict:
     )
     priors["mass_ratio"] = bilby.gw.prior.UniformInComponentsMassRatio(Q_MIN, 1.0, name="mass_ratio")
     priors["luminosity_distance"] = bilby.core.prior.PowerLaw(
-        2.0, DISTANCE_RANGE[0], DISTANCE_RANGE[1], name="luminosity_distance"
+        2.0, *inj.get("distance_range", DISTANCE_RANGE), name="luminosity_distance"
     )
     priors["geocent_time"] = bilby.core.prior.Uniform(t0 - TIME_WINDOW, t0 + TIME_WINDOW, name="geocent_time")
     for key in ("mass_1", "mass_2"):
