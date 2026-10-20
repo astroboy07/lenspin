@@ -112,9 +112,9 @@ def lensed_bbh_relative_binning(frequency_array, mass_1, mass_2, luminosity_dist
     return {k: v * factor for k, v in h.items()}
 
 
-def waveform_arguments() -> dict:
+def waveform_arguments(inj: dict | None = None) -> dict:
     return {
-        "waveform_approximant": APPROXIMANT,
+        "waveform_approximant": (inj or {}).get("approximant", APPROXIMANT),
         "reference_frequency": F_REF,
         "minimum_frequency": F_MIN_DEFAULT,
     }
@@ -197,17 +197,22 @@ def make_ifos(inj: dict, distance: float | None = None) -> bilby.gw.detector.Int
     ifos = bilby.gw.detector.InterferometerList(
         [interferometer(p, F_MIN_DEFAULT, duration) for p in NETWORKS[inj["network"]]]
     )
-    ifos.set_strain_data_from_zero_noise(
-        sampling_frequency=SAMPLING_FREQUENCY,
-        duration=duration,
-        start_time=params["geocent_time"] + POST_TRIGGER - duration,
-    )
+    start_time = params["geocent_time"] + POST_TRIGGER - duration
+    if "noise_seed" in inj:
+        bilby.core.utils.random.seed(inj["noise_seed"])
+        ifos.set_strain_data_from_power_spectral_densities(
+            sampling_frequency=SAMPLING_FREQUENCY, duration=duration, start_time=start_time
+        )
+    else:
+        ifos.set_strain_data_from_zero_noise(
+            sampling_frequency=SAMPLING_FREQUENCY, duration=duration, start_time=start_time
+        )
     wfg = bilby.gw.WaveformGenerator(
         duration=duration,
         sampling_frequency=SAMPLING_FREQUENCY,
         frequency_domain_source_model=wave_lensed_bbh if inj.get("optics") == "wave" else lensed_bbh,
         parameter_conversion=bilby.gw.conversion.convert_to_lal_binary_black_hole_parameters,
-        waveform_arguments=waveform_arguments(),
+        waveform_arguments=waveform_arguments(inj),
     )
     ifos.inject_signal(waveform_generator=wfg, parameters=params, raise_error=False)
     return ifos
@@ -266,7 +271,7 @@ def make_likelihood(model: str, inj: dict, ifos, priors, relative_binning: bool 
         sampling_frequency=SAMPLING_FREQUENCY,
         frequency_domain_source_model=source,
         parameter_conversion=bilby.gw.conversion.convert_to_lal_binary_black_hole_parameters,
-        waveform_arguments=waveform_arguments(),
+        waveform_arguments=waveform_arguments(inj),
     )
     if not relative_binning:
         if lookup is None:
@@ -322,6 +327,7 @@ def run(study: str, index: int, model: str, outdir: Path, npool: int, nlive: int
         "log_noise_evidence": float(result.log_noise_evidence),
         "max_log_likelihood": float(np.max(result.posterior["log_likelihood"])),
         "network_snr": float(np.sqrt(sum(ifo.meta_data["optimal_SNR"] ** 2 for ifo in ifos))),
+        "network_mf_snr": float(np.sqrt(sum(abs(ifo.meta_data["matched_filter_SNR"]) ** 2 for ifo in ifos))),
         "nlive": nlive,
         "seed": seed,
     }
