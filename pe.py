@@ -110,6 +110,29 @@ def wave_lensed_bbh(frequency_array, mass_1, mass_2, luminosity_distance, a_1, t
     return {k: v * factor for k, v in h.items()}
 
 
+def guarded_bbh(frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2,
+                phi_jl, theta_jn, phase, **kwargs):  # fmt: skip
+    """Unlensed source that gives zero likelihood where the waveform model refuses the parameters."""
+    try:
+        return lal_binary_black_hole(
+            frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2, phi_jl,
+            theta_jn, phase, **kwargs,
+        )  # fmt: skip
+    except RuntimeError:
+        return None
+
+
+def guarded_lensed_bbh(frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2,
+                       phi_jl, theta_jn, phase, lens_dt, lens_flux_ratio, **kwargs):  # fmt: skip
+    try:
+        return lensed_bbh(
+            frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12, a_2, tilt_2, phi_jl,
+            theta_jn, phase, lens_dt, lens_flux_ratio, **kwargs,
+        )  # fmt: skip
+    except RuntimeError:
+        return None
+
+
 def lensed_bbh_relative_binning(frequency_array, mass_1, mass_2, luminosity_distance, a_1, tilt_1, phi_12,
                                 a_2, tilt_2, phi_jl, theta_jn, phase, lens_dt, lens_flux_ratio,
                                 **kwargs):  # fmt: skip
@@ -277,7 +300,7 @@ def fiducial(model: str, inj: dict) -> dict:
 def make_likelihood(model: str, inj: dict, ifos, priors, relative_binning: bool = False, lookup=None):
     source = lensed_bbh_relative_binning if model == "lensed" else lal_binary_black_hole_relative_binning
     if not relative_binning:
-        source = lensed_bbh if model == "lensed" else lal_binary_black_hole
+        source = guarded_lensed_bbh if model == "lensed" else guarded_bbh
     wfg = bilby.gw.WaveformGenerator(
         duration=segment_duration(inj),
         sampling_frequency=SAMPLING_FREQUENCY,
