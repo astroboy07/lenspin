@@ -13,6 +13,7 @@ REFERENCE_SNR = 25.0
 SNRS = (8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 35.0, 50.0)
 DT_MS = np.arange(0.5, 40.0, 1.0)
 FLUXES = (0.05, 0.1, 0.2, 0.35, 0.6)
+DENSE_FLUXES = tuple(float(f) for f in np.round(np.geomspace(0.03, 0.9, 20), 4))
 TOTAL_MASSES = (30.0, 60.0, 100.0, 180.0)
 TRUE_Q = (1.0, 0.5)
 OPTICS = ("geometric", "wave")
@@ -24,10 +25,10 @@ MAX_STARTS = 4
 KEYS = ("total_mass", "q_true", "dt_ms", "flux", "optics")
 
 
-def cells(masses: tuple = TOTAL_MASSES, dt_step: float = 1.0) -> list[dict]:
+def cells(masses: tuple = TOTAL_MASSES, dt_step: float = 1.0, fluxes: tuple = FLUXES, optics: tuple = OPTICS) -> list[dict]:
     """Lightest systems first, so the slowest cells start early."""
     delays = DT_MS[:: max(1, round(dt_step))]
-    grid = itertools.product(sorted(masses), TRUE_Q, OPTICS, FLUXES, delays)
+    grid = itertools.product(sorted(masses), TRUE_Q, optics, fluxes, delays)
     return [dict(zip(("total_mass", "q_true", "optics", "flux", "dt_ms"), (m, q, o, f, round(float(t), 3))))
             for m, q, o, f, t in grid]  # fmt: skip
 
@@ -84,13 +85,16 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="run only the first N cells (timing)")
     parser.add_argument("--masses", type=float, nargs="*", default=list(TOTAL_MASSES))
     parser.add_argument("--dt-step", type=float, default=1.0, help="keep every n-th delay of DT_MS")
+    parser.add_argument("--dense", action="store_true", help="use DENSE_FLUXES instead of FLUXES")
+    parser.add_argument("--optics", nargs="*", choices=OPTICS, default=list(OPTICS))
     args = parser.parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
     summary_path, solutions_path = args.outdir / "cells.csv", args.outdir / "solutions.csv"
     done = set()
     if summary_path.exists():
         done = {tuple(r) for r in pd.read_csv(summary_path)[list(KEYS)].drop_duplicates().itertuples(index=False)}
-    todo = [c for c in cells(tuple(args.masses), args.dt_step) if tuple(c[k] for k in KEYS) not in done][: args.limit]
+    grid = cells(tuple(args.masses), args.dt_step, DENSE_FLUXES if args.dense else FLUXES, tuple(args.optics))
+    todo = [c for c in grid if tuple(c[k] for k in KEYS) not in done][: args.limit]
     print(f"{len(todo)} cells to run ({len(done)} already done)", flush=True)
     with ProcessPoolExecutor(args.workers) as pool:
         futures = {pool.submit(run_cell, c): c for c in todo}
