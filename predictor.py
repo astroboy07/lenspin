@@ -172,7 +172,8 @@ class Model:
         else:
             self.shape = lambda mc, eta, c1, c2: xp_shape(self.grid, mc, eta, c1, c2)
         q = inj["m2"] / inj["m1"]
-        self.truth = np.array([np.log(chirp_mass(inj["m1"], inj["m2"])), q / (1.0 + q) ** 2, 0, 0, 0, 0], float)
+        self.truth = np.array([np.log(chirp_mass(inj["m1"], inj["m2"])), q / (1.0 + q) ** 2, inj.get("chi_eff", 0.0),
+                               0, 0, 0], float)  # fmt: skip
         self.log_mchirp_range = self.truth[0] + np.log(inj["mchirp_span"])
         self.lens_truth = (inj.get("dt", 0.0), inj.get("flux", 0.0))
         if self.lens_truth[1] == 0:

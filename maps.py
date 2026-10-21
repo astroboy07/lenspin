@@ -36,7 +36,7 @@ def cells(masses: tuple = TOTAL_MASSES, dt_step: float = 1.0, fluxes: tuple = FL
 def injection(cell: dict) -> dict:
     m1 = cell["total_mass"] / (1.0 + cell["q_true"])
     return {"m1": m1, "m2": cell["q_true"] * m1, "dt": cell["dt_ms"] * 1e-3, "flux": cell["flux"],
-            "mchirp_span": MCHIRP_SPAN, "target_snr": REFERENCE_SNR}  # fmt: skip
+            "mchirp_span": MCHIRP_SPAN, "target_snr": REFERENCE_SNR, "chi_eff": cell.get("chi_eff_true", 0.0)}  # fmt: skip
 
 
 def run_cell(cell: dict) -> tuple[list[dict], list[dict]]:
