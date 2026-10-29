@@ -3,9 +3,8 @@ import time
 import lal
 import numpy as np
 
-from fit import Problem
-from network import GPS_TIME
-from pe import (
+from lenspin.fitting.fit import Problem
+from lenspin.inference.pe import (
     INJECTIONS,
     MODELS,
     STUDIES,
@@ -18,7 +17,8 @@ from pe import (
     make_priors,
     segment_duration,
 )
-from signals import D_REF_MPC
+from lenspin.models.network import GPS_TIME
+from lenspin.models.signals import D_REF_MPC
 
 GEOMETRY_TOL = 1e-6
 SNR_TOL = 1e-3

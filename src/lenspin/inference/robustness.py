@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from maps import REFERENCE_SNR, injection
-from pe import APPROXIMANT, STUDIES
-from pe_posteriors import summarise
-from predictor import Model, log_z_from
+from lenspin.bias.maps import REFERENCE_SNR, injection
+from lenspin.bias.predictor import Model, log_z_from
+from lenspin.inference.pe import APPROXIMANT, STUDIES
+from lenspin.inference.pe_posteriors import summarise
 
 BASELINES = ("danger", "scan")
 ROBUSTNESS = ("noise_danger", "noise_scan", "inclination", "waveform")

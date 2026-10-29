@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from fit import PrecessingProblem, Problem, run_problem, run_reverse_problem
+from lenspin.fitting.fit import PrecessingProblem, Problem, run_problem, run_reverse_problem
 
 CONFIG = {"m1": 100.0, "m2": 80.0, "cosi": 0.5, "psi": 0.3, "ra": 1.0, "dec": 0.4}
 LENS = {"dt": 0.01, "flux_ratio": 0.5}

@@ -4,7 +4,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from pe import STUDIES, STUDY_MODELS
+from lenspin.inference.pe import STUDIES, STUDY_MODELS
 
 
 def launch(job: tuple[int, str], study: str, outdir: Path, npool: int, nlive: int) -> str:
@@ -14,8 +14,8 @@ def launch(job: tuple[int, str], study: str, outdir: Path, npool: int, nlive: in
         return f"{label}: already done"
     with (outdir / f"{label}.log").open("w") as log:
         code = subprocess.call(
-            [sys.executable, "pe.py", "--study", study, "--index", str(index), "--model", model, "--outdir", str(outdir),
-             "--npool", str(npool), "--nlive", str(nlive)],
+            [sys.executable, "-m", "lenspin.inference.pe", "--study", study, "--index", str(index), "--model", model,
+             "--outdir", str(outdir), "--npool", str(npool), "--nlive", str(nlive)],
             stdout=log,
             stderr=subprocess.STDOUT,
         )  # fmt: skip

@@ -8,10 +8,10 @@ import lalsimulation
 import numpy as np
 from bilby.gw.source import lal_binary_black_hole, lal_binary_black_hole_relative_binning
 
-from network import F_MIN_DEFAULT, GPS_TIME, NETWORKS, PSD_MODELS
-from run_grid import INJECTION_PSI, fibonacci_sky
-from signals import F_REF, chirp_mass, component_masses, lens_factor
-from waveoptics import wave_lens_factor
+from lenspin.fitting.run_grid import INJECTION_PSI, fibonacci_sky
+from lenspin.models.network import F_MIN_DEFAULT, GPS_TIME, NETWORKS, PSD_MODELS
+from lenspin.models.signals import F_REF, chirp_mass, component_masses, lens_factor
+from lenspin.models.waveoptics import wave_lens_factor
 
 SAMPLING_FREQUENCY = 2048.0
 APPROXIMANT = "IMRPhenomXP"

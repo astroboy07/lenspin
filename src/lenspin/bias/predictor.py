@@ -11,10 +11,10 @@ from scipy.integrate import quad
 from scipy.optimize import minimize_scalar
 from scipy.special import logsumexp
 
-from network import F_MAX, F_MIN_DEFAULT, PSD_MODELS, UPSAMPLE, FrequencyGrid, noise_weights
-from pe import DT_MAX, Q_MIN, SPIN_MAX, STUDIES, make_ifos, segment_duration
-from signals import aligned_polarizations, chirp_mass, component_masses, lens_factor
-from waveoptics import wave_lens_factor
+from lenspin.inference.pe import DT_MAX, Q_MIN, SPIN_MAX, STUDIES, make_ifos, segment_duration
+from lenspin.models.network import F_MAX, F_MIN_DEFAULT, PSD_MODELS, UPSAMPLE, FrequencyGrid, noise_weights
+from lenspin.models.signals import aligned_polarizations, chirp_mass, component_masses, lens_factor
+from lenspin.models.waveoptics import wave_lens_factor
 
 SNR = 25.0
 NAMES = ("log_mchirp", "eta", "chi", "tc", "phic", "log_amp", "lens_dt", "lens_flux")

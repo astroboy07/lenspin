@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from predictor import Model, laplace_posterior, log_z_from, profile_cell, q_weights, summary_of
+from lenspin.bias.predictor import Model, laplace_posterior, log_z_from, profile_cell, q_weights, summary_of
 
 REFERENCE_SNR = 25.0
 SNRS = (8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 35.0, 50.0)

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from maps import append, run_cell
-from rates import point_lens_observables
+from lenspin.bias.maps import append, run_cell
+from lenspin.implications.rates import point_lens_observables
 
 # NRSur7dq4 isolated point-lens fit of GW231123 (Goyal et al., arXiv:2512.17631, Tables 1 and S1).
 LENS_MASS, LENS_Y = 821.0, 0.68

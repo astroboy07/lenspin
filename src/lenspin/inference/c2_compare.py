@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pe import STUDIES
-from pe_posteriors import summarise
+from lenspin.inference.pe import STUDIES
+from lenspin.inference.pe_posteriors import summarise
 
 KEYS = ("total_mass", "q_true", "dt_ms", "flux", "optics")
 SHOW = ("chi_eff", "q", "mchirp")

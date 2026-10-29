@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 from astropy.cosmology import Planck18
 
-from maps import SNRS
-from maps_summary import MTSUN_MS, flags
-from waveoptics import lens_parameters, magnifications, scaled_delay
+from lenspin.bias.maps import SNRS
+from lenspin.bias.maps_summary import MTSUN_MS, flags
+from lenspin.models.waveoptics import lens_parameters, magnifications, scaled_delay
 
 MSUN_S = MTSUN_MS * 1e-3
 C_KMS = 299792.458

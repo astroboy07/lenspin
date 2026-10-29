@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from analyze import FIG_WIDTH, NETWORK_ORDER, PANEL_HEIGHT, RHO_CAP, STYLE
+from lenspin.fitting.analyze import FIG_WIDTH, NETWORK_ORDER, PANEL_HEIGHT, RHO_CAP, STYLE
 
 CONFIG = ["m1", "m2", "chi1", "cos_tilt1", "chi2z", "cos_theta_jn", "phi_jl", "sky_mode"]
 

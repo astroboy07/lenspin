@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from fit import Problem, joint_forward_rows
+from lenspin.fitting.fit import Problem, joint_forward_rows
 
 PRESETS = {
     "pilot": {

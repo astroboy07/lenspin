@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import differential_evolution, minimize, minimize_scalar
 
-from network import F_MAX, F_MIN, F_MIN_DEFAULT, Network, aligned_fstat, make_grid, precessing_overlap
-from signals import (
+from lenspin.models.network import F_MAX, F_MIN, F_MIN_DEFAULT, Network, aligned_fstat, make_grid, precessing_overlap
+from lenspin.models.signals import (
     D_REF_MPC,
     aligned_polarizations,
     chirp_mass,

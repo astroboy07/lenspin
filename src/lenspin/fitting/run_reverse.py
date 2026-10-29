@@ -4,8 +4,8 @@ import traceback
 
 import numpy as np
 
-from fit import PrecessingProblem, joint_reverse_rows
-from run_grid import INJECTION_PSI, execute, fibonacci_sky, parse_args, task_rows
+from lenspin.fitting.fit import PrecessingProblem, joint_reverse_rows
+from lenspin.fitting.run_grid import INJECTION_PSI, execute, fibonacci_sky, parse_args, task_rows
 
 PRESETS = {
     "pilot": {

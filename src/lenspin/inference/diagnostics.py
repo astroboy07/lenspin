@@ -7,8 +7,8 @@ import lalsimulation
 import numpy as np
 import pandas as pd
 
-from pe import STUDIES, injection_distance, make_ifos
-from signals import F_REF, component_masses
+from lenspin.inference.pe import STUDIES, injection_distance, make_ifos
+from lenspin.models.signals import F_REF, component_masses
 
 NSAMPLES = 400
 NFREQ = 200
