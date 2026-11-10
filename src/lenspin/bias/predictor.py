@@ -678,10 +678,11 @@ def importance_check(solutions: pd.DataFrame, study: str, indices: list[int], op
     tasks = [(study, int(r["index"]), optics, r.to_dict()) for _, r in picked.iterrows()]
     with ProcessPoolExecutor(workers) as pool:
         checked = pd.DataFrame(list(pool.map(importance_task, tasks, chunksize=1)))
+    checked["log_z_laplace"] = [r["log_z"] + spin_prior_correction(r) for r in checked.to_dict("records")]
     summary = []
     for index, group in checked.groupby("index"):
         summary.append({"index": index, **{f"is_{k}": v for k, v in laplace_posterior(group, "log_z_is", correct=False).items()},
-                        "min_ess": group["ess"].min(), "max_dlogz": (group["log_z_is"] - group["log_z"]).abs().max()})  # fmt: skip
+                        "min_ess": group["ess"].min(), "max_dlogz": (group["log_z_is"] - group["log_z_laplace"]).abs().max()})  # fmt: skip
     return pd.DataFrame(summary), checked
 
 
@@ -765,8 +766,13 @@ def main() -> None:
     indices = args.indices if args.indices else list(range(len(STUDIES[args.study])))
     if args.reprofile:
         table = pd.read_csv(args.outdir / f"predictor_{tag}.csv")
-        table = table[[c for c in table.columns if not c.startswith("lap_")]]
-        table = table.merge(laplace_summary(pd.read_csv(args.outdir / f"predictor_profile_{tag}.csv")), on="index")
+        table = table[[c for c in table.columns if not c.startswith(("lap_", "is_")) and c not in ("min_ess", "max_dlogz")]]
+        solutions = pd.read_csv(args.outdir / f"predictor_profile_{tag}.csv")
+        table = table.merge(laplace_summary(solutions), on="index")
+        if args.importance:
+            checked_summary, checked = importance_check(solutions, args.study, args.importance, args.optics, args.workers)
+            checked.to_csv(args.outdir / f"predictor_importance_{tag}.csv", index=False)
+            table = table.merge(checked_summary, on="index", how="left")
         table.to_csv(args.outdir / f"predictor_{tag}.csv", index=False)
         cols = ["index"] + [f"{src}_{k}_{p}" for k in ("chi_eff", "q", "mchirp") for src in ("pe", "lap")
                             for p in ("lo", "med", "hi")] + ["lap_lnB_lensed_vs_aligned"]  # fmt: skip
