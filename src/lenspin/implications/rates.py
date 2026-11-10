@@ -18,6 +18,8 @@ GW231123_FITS = {"IMRPhenomXPHM-ST": (911.0, 0.61), "NRSur7dq4": (803.0, 0.69)}
 # Detected SNRs follow p(rho) ~ rho^-4 above 8; each map SNR stands for the bin around it.
 SNR_EDGES = (8.0, 9.0, 11.0, 13.5, 17.5, 22.5, 30.0, 42.0, np.inf)
 LEVELS = ("biased", "danger_8", "danger_3")
+# Detected counts scale as mu^1.5 for N(> rho) ~ rho^-3, so lensed events are over-represented by that factor.
+MAGNIFICATION_POWER = 1.5
 LENS_MASSES = np.geomspace(10.0, 1e4, 31)
 SOURCE_Z = (0.5, 1.0, 2.0)
 Y_GRID = np.linspace(1e-3, 3.0, 1500)
@@ -62,8 +64,9 @@ def edges(values: np.ndarray, log: bool = False) -> np.ndarray:
     return np.exp(e) if log else e
 
 
-def flagged_area(grid: pd.DataFrame) -> np.ndarray:
-    """Cross-section in y^2 of the flagged (delay, flux) cells, on the redshifted-lens-mass grid LOG_MLZ."""
+def flagged_area(grid: pd.DataFrame, power: float = 0.0) -> np.ndarray:
+    """Cross-section in y^2 of the flagged (delay, flux) cells, on the redshifted-lens-mass grid LOG_MLZ.
+    Each y is weighted by the total magnification to the given power (magnification bias)."""
     dt_edges, flux_edges = edges(grid.columns.to_numpy()), edges(grid.index.to_numpy(), log=True)
     flagged = grid.to_numpy(bool)
     mu_plus, mu_minus = magnifications(Y_GRID)
@@ -72,29 +75,34 @@ def flagged_area(grid: pd.DataFrame) -> np.ndarray:
     j = np.searchsorted(dt_edges, delays) - 1
     inside = (i >= 0) & (i < flagged.shape[0]) & (j >= 0) & (j < flagged.shape[1])
     hit = np.where(inside, flagged[np.clip(i, 0, flagged.shape[0] - 1), np.clip(j, 0, flagged.shape[1] - 1)], False)
-    return np.trapezoid(2.0 * Y_GRID * hit, Y_GRID, axis=1)
+    return np.trapezoid(2.0 * Y_GRID * (mu_plus + mu_minus) ** power * hit, Y_GRID, axis=1)
 
 
 def depths(cells: pd.DataFrame) -> pd.DataFrame:
-    """Optical depth (per unit compact-object fraction f) of the flagged cells for monochromatic lenses."""
+    """Optical depth (per unit compact-object fraction f) of the flagged cells for monochromatic lenses:
+    "depth" is the bare optical depth, "depth_magnified" weights it by the magnification bias."""
     kernels = {zs: lens_kernel(zs) for zs in SOURCE_Z}
     rows = []
     for (mass, q, snr), cell in flags(cells).groupby(["total_mass", "q_true", "snr"]):
         for level in LEVELS:
-            area = flagged_area(cell.pivot(index="flux", columns="dt_ms", values=level))
+            grid = cell.pivot(index="flux", columns="dt_ms", values=level)
+            areas = {"depth": flagged_area(grid), "depth_magnified": flagged_area(grid, MAGNIFICATION_POWER)}
             for zs, lens_mass in itertools.product(SOURCE_Z, LENS_MASSES):
                 z, kernel = kernels[zs]
-                a = np.interp(np.log(lens_mass * (1 + z)), LOG_MLZ, area)
+                log_mlz = np.log(lens_mass * (1 + z))
                 rows.append({"total_mass": mass, "q_true": q, "snr": snr, "level": level, "z_source": zs,
-                             "lens_mass": lens_mass, "depth": np.trapezoid(kernel * a, z)})  # fmt: skip
+                             "lens_mass": lens_mass,
+                             **{k: np.trapezoid(kernel * np.interp(log_mlz, LOG_MLZ, a), z) for k, a in areas.items()}})  # fmt: skip
     return pd.DataFrame(rows)
 
 
 def per_event(table: pd.DataFrame) -> pd.DataFrame:
-    """Probability per detected event and unit f, averaging the SNR over p(rho) ~ rho^-4."""
-    weights = dict(zip(SNRS, snr_weights()))
-    table = table.assign(weighted=table["depth"] * table["snr"].map(weights))
-    return table.groupby(["total_mass", "q_true", "level", "z_source", "lens_mass"], as_index=False)["weighted"].sum()
+    """Probability per detected event and unit f, averaging the SNR over p(rho) ~ rho^-4: "weighted" includes
+    the magnification bias, "unmagnified" does not."""
+    weights = table["snr"].map(dict(zip(SNRS, snr_weights())))
+    table = table.assign(weighted=table["depth_magnified"] * weights, unmagnified=table["depth"] * weights)
+    keys = ["total_mass", "q_true", "level", "z_source", "lens_mass"]
+    return table.groupby(keys, as_index=False)[["weighted", "unmagnified"]].sum()
 
 
 def show(danger: pd.DataFrame) -> None:
@@ -115,16 +123,19 @@ def show_depths(events: pd.DataFrame) -> None:
         print(f"tau(y < 1, f = 1, z_s = {zs:g}) = {np.trapezoid(kernel, z):.2e}")
     best = events[events["z_source"] == 1.0].sort_values("weighted").groupby(["total_mass", "q_true", "level"]).tail(1)
     print(best.sort_values(["level", "total_mass", "q_true"]).to_string(index=False, float_format="%.3g"))
+    print("largest probability per unit f over sources and lens masses (magnified, unmagnified):")
+    print(events.groupby(["level", "z_source"])[["weighted", "unmagnified"]].max().to_string(float_format="%.3g"))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cells", type=Path, default=Path("results/maps/cells.csv"))
     parser.add_argument("--out", type=Path, default=Path("results/rates"))
+    parser.add_argument("--optics", choices=("geometric", "wave"), default="geometric")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     cells = pd.read_csv(args.cells)
-    cells = cells[cells["optics"] == "geometric"]
+    cells = cells[cells["optics"] == args.optics]
     for level in (8.0, 3.0):
         danger = danger_lenses(cells, level)
         danger.to_csv(args.out / f"danger_lenses_{level:g}.csv", index=False)
