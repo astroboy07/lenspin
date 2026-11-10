@@ -60,6 +60,7 @@ STUDIES["noise_danger"] = [{**inj, "noise_seed": seed} for inj in (HIDDEN_180, H
 STUDIES["noise_scan"] = [{**SCAN[dt], "noise_seed": seed} for dt in (12.5, 14.5) for seed in NOISE_SEEDS]
 STUDIES["inclination"] = [{**inj, "cosi": cosi} for inj in (HIDDEN_180, SCAN[12.5], SCAN[20.5]) for cosi in (0.2, 0.95)]
 STUDIES["waveform"] = [{**inj, "approximant": "IMRPhenomXO4a"} for inj in (HIDDEN_180, SCAN[10.5], SCAN[20.5])]
+STUDIES["network_wide"] = [{**inj, "mchirp_span": (0.4, 1.6)} for inj in STUDIES["network"]]
 STUDY_MODELS = {
     "network": ("precessing", "lensed", "aligned"),
     "generality": ("precessing", "aligned"),
@@ -69,6 +70,7 @@ STUDY_MODELS = {
     "noise_scan": ("precessing", "aligned"),
     "inclination": ("precessing", "aligned"),
     "waveform": ("precessing", "aligned"),
+    "network_wide": ("precessing", "lensed", "aligned"),
 }
 INJECTIONS = STUDIES["network"]
 MODELS = ("aligned", "precessing", "lensed")
