@@ -50,6 +50,11 @@ IS_SAMPLES = 8000
 IS_INFLATE = 1.3
 U_FLAT = 0.5
 U_CELLS = 4000
+U_NODES = 2000
+CHI_NODES = 81
+CHI_SIGMAS = 5.0
+CHI_EDGE = 0.985
+VARIANCES = ("var_log_mchirp", "var_chi", "cov_log_mchirp_chi")
 
 
 def eta_to_q(eta: float) -> float:
@@ -110,6 +115,39 @@ def log_spin_integral(chi: float, q: float, grad: float, curv: float) -> float:
     points = sorted({p for p in (-chi / q, chi, peak) if lo < p < hi})
     value = quad(integrand, lo, hi, points=points, limit=400)[0]
     return float(np.log(max(value, 1e-300)) + top + np.log1p(q))
+
+
+def log_spin_marginal(chi: np.ndarray, q: float, grad: float, curv: float) -> np.ndarray:
+    """log_spin_integral for an array of chi, by the midpoint rule in u."""
+    lo = np.maximum((-SPIN_MAX - chi) / q, chi - SPIN_MAX)
+    hi = np.minimum((SPIN_MAX - chi) / q, chi + SPIN_MAX)
+    u = lo[:, None] + (hi - lo)[:, None] * (np.arange(U_NODES) + 0.5) / U_NODES
+    log_f = log_spin_prior(chi[:, None] + q * u) + log_spin_prior(chi[:, None] - u) + grad * u - 0.5 * curv * u * u
+    return logsumexp(log_f, axis=1) + np.log((hi - lo) / U_NODES) + np.log1p(q)
+
+
+def chi_density(row: dict, s2: float = 1.0) -> tuple[np.ndarray, np.ndarray] | None:
+    """chi grid around a fixed-q solution and the density on it: the likelihood Gaussian times the spin
+    prior relative to its value at the solution. grad and curv are scaled by s2; row["var_chi"] is already
+    at the target SNR. None where the grid collapses."""
+    sigma = np.sqrt(row["var_chi"])
+    if not np.isfinite(sigma):
+        return None
+    nodes = row["chi_eff"] + sigma * np.linspace(-CHI_SIGMAS, CHI_SIGMAS, CHI_NODES)
+    chi = np.unique(np.clip(nodes, -CHI_EDGE, CHI_EDGE))
+    if len(chi) < 3:
+        return None
+    centre = np.array([np.clip(row["chi_eff"], -CHI_EDGE, CHI_EDGE)])
+    grad, curv = s2 * row["grad"], s2 * row["curv"]
+    ratio = np.exp(log_spin_marginal(chi, row["q"], grad, curv) - log_spin_marginal(centre, row["q"], grad, curv))
+    return chi, ratio * np.exp(-0.5 * ((chi - row["chi_eff"]) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
+
+
+def spin_prior_correction(row: dict, var_scale: float = 1.0) -> float:
+    """log of the average of the spin prior over the chi likelihood, relative to the prior at the solution.
+    Added to log_z_from, which evaluates the prior only at the solution."""
+    shape = chi_density({**row, "var_chi": row["var_chi"] * var_scale}, 1.0 / var_scale)
+    return 0.0 if shape is None else float(np.log(np.trapezoid(shape[1], shape[0])))
 
 
 def u_proposal(chi: float, q: float, grad: float, curv: float, rng: np.random.Generator) -> tuple:
@@ -545,24 +583,53 @@ def profile_cell(model: Model, data: np.ndarray, starts: tuple, kind: str, q_gri
 
 
 def q_weights(profile: pd.DataFrame, column: str = "log_z") -> pd.Series:
+    """Evidence times the q prior and the trapezoid width of each q node."""
     grid = np.sort(profile["q"].unique())
-    widths = dict(zip(grid, np.gradient(grid)))
+    width = np.gradient(grid)
+    width[[0, -1]] *= 0.5
+    widths = dict(zip(grid, width))
     return profile[column] + log_prior_q(profile["q"]) + np.log(profile["q"].map(widths))
 
 
-def laplace_posterior(profile: pd.DataFrame, column: str = "log_z", var_scale: float = 1.0) -> dict:
-    """Mixture of conditional Gaussians over the q grid, weighted by evidence times the q prior."""
+def mixture(profile: pd.DataFrame, column: str, var_scale: float, correct: bool = True) -> tuple:
+    """Solutions with variances at the target SNR, their chi densities and their log weights. With correct,
+    the weights include the spin prior averaged over the chi likelihood (not for evidences that already
+    integrate the prior, such as importance-sampled ones)."""
+    profile = profile.assign(**{k: profile[k] * var_scale for k in VARIANCES})
+    shapes = [chi_density(r, 1.0 / var_scale) for r in profile.to_dict("records")]
+    weight = q_weights(profile, column).to_numpy()
+    if correct:
+        weight = weight + np.array([0.0 if s is None else np.log(np.trapezoid(s[1], s[0])) for s in shapes])
+    return profile, shapes, weight
+
+
+def log_evidence(profile: pd.DataFrame, column: str = "log_z", var_scale: float = 1.0) -> float:
+    return float(logsumexp(mixture(profile, column, var_scale)[2]))
+
+
+def laplace_posterior(profile: pd.DataFrame, column: str = "log_z", var_scale: float = 1.0,
+                      correct: bool = True) -> dict:  # fmt: skip
+    """Mixture over the q grid of the conditional posteriors, weighted by evidence times the q prior. In chi
+    each is the likelihood Gaussian times the spin prior; log_mchirp is Gaussian given chi."""
     rng = np.random.default_rng(1)
-    profile = profile.assign(**{k: profile[k] * var_scale for k in ("var_log_mchirp", "var_chi", "cov_log_mchirp_chi")})
-    weight = q_weights(profile, column)
+    profile, shapes, weight = mixture(profile, column, var_scale, correct)
     prob = np.exp(weight - weight.max())
     prob /= prob.sum()
-    rows = profile.iloc[rng.choice(len(profile), POSTERIOR_SAMPLES, p=prob)]
-    mean = rows[["log_mchirp", "chi_eff"]].to_numpy()
-    cov = np.stack([rows[["var_log_mchirp", "cov_log_mchirp_chi"]].to_numpy(),
-                    rows[["cov_log_mchirp_chi", "var_chi"]].to_numpy()], axis=1)  # fmt: skip
-    draws = mean + np.einsum("nij,nj->ni", np.linalg.cholesky(cov), rng.standard_normal((len(rows), 2)))
-    samples = {"q": rows["q"].to_numpy(), "mchirp": np.exp(draws[:, 0]), "chi_eff": np.clip(draws[:, 1], -1, 1)}
+    pick = rng.choice(len(profile), POSTERIOR_SAMPLES, p=prob)
+    chi0, var_chi = profile["chi_eff"].to_numpy(), profile["var_chi"].to_numpy()
+    cross = profile["cov_log_mchirp_chi"].to_numpy()
+    chi = np.clip(chi0[pick], -1.0, 1.0)
+    for i in np.unique(pick):
+        if shapes[i] is not None:
+            grid, density = shapes[i]
+            cdf = np.concatenate([[0.0], np.cumsum(0.5 * (density[1:] + density[:-1]) * np.diff(grid))])
+            here = pick == i
+            chi[here] = np.interp(rng.uniform(size=here.sum()) * cdf[-1], cdf, grid)
+    slope = np.divide(cross, var_chi, out=np.zeros_like(cross), where=var_chi > 0)
+    spread = np.sqrt(np.maximum(profile["var_log_mchirp"].to_numpy() - slope * cross, 0.0))
+    log_mchirp = (profile["log_mchirp"].to_numpy()[pick] + slope[pick] * (chi - chi0[pick])
+                  + spread[pick] * rng.standard_normal(POSTERIOR_SAMPLES))  # fmt: skip
+    samples = {"q": profile["q"].to_numpy()[pick], "mchirp": np.exp(log_mchirp), "chi_eff": chi}
     out = {"log_z": float(logsumexp(weight))}
     for name, values in samples.items():
         lo, mid, hi = np.percentile(values, (5, 50, 95))
@@ -584,13 +651,16 @@ def profile(table: pd.DataFrame, fits: pd.DataFrame, study: str, optics: str,
         tasks += [(study, index, optics, kind, starts) for kind in ("aligned", "lensed")]
     with ProcessPoolExecutor(workers) as pool:
         solutions = pd.DataFrame([row for rows in pool.map(profile_task, tasks, chunksize=1) for row in rows])
+    return table.merge(laplace_summary(solutions), on="index"), solutions
+
+
+def laplace_summary(solutions: pd.DataFrame) -> pd.DataFrame:
     summary = []
     for index, group in solutions.groupby("index"):
         aligned = laplace_posterior(group[group["kind"] == "aligned"])
-        lensed = laplace_posterior(group[group["kind"] == "lensed"])
         summary.append({"index": index, **{f"lap_{k}": v for k, v in aligned.items()},
-                        "lap_lnB_lensed_vs_aligned": lensed["log_z"] - aligned["log_z"]})  # fmt: skip
-    return table.merge(pd.DataFrame(summary), on="index"), solutions
+                        "lap_lnB_lensed_vs_aligned": log_evidence(group[group["kind"] == "lensed"]) - aligned["log_z"]})  # fmt: skip
+    return pd.DataFrame(summary)
 
 
 def importance_task(task: tuple) -> dict:
@@ -610,7 +680,7 @@ def importance_check(solutions: pd.DataFrame, study: str, indices: list[int], op
         checked = pd.DataFrame(list(pool.map(importance_task, tasks, chunksize=1)))
     summary = []
     for index, group in checked.groupby("index"):
-        summary.append({"index": index, **{f"is_{k}": v for k, v in laplace_posterior(group, "log_z_is").items()},
+        summary.append({"index": index, **{f"is_{k}": v for k, v in laplace_posterior(group, "log_z_is", correct=False).items()},
                         "min_ess": group["ess"].min(), "max_dlogz": (group["log_z_is"] - group["log_z"]).abs().max()})  # fmt: skip
     return pd.DataFrame(summary), checked
 
@@ -689,9 +759,19 @@ def main() -> None:
     parser.add_argument("--importance", type=int, nargs="*", default=[])
     parser.add_argument("--scan", action="store_true")
     parser.add_argument("--toy", action="store_true")
+    parser.add_argument("--reprofile", action="store_true", help="redo the Laplace columns from the stored profile")
     args = parser.parse_args()
     tag = f"{args.study}_{args.optics}"
     indices = args.indices if args.indices else list(range(len(STUDIES[args.study])))
+    if args.reprofile:
+        table = pd.read_csv(args.outdir / f"predictor_{tag}.csv")
+        table = table[[c for c in table.columns if not c.startswith("lap_")]]
+        table = table.merge(laplace_summary(pd.read_csv(args.outdir / f"predictor_profile_{tag}.csv")), on="index")
+        table.to_csv(args.outdir / f"predictor_{tag}.csv", index=False)
+        cols = ["index"] + [f"{src}_{k}_{p}" for k in ("chi_eff", "q", "mchirp") for src in ("pe", "lap")
+                            for p in ("lo", "med", "hi")] + ["lap_lnB_lensed_vs_aligned"]  # fmt: skip
+        print(table[cols].to_string(index=False, float_format=lambda v: f"{v:.3g}"))
+        return
     if args.toy:
         curves, info = toy()
         curves.to_csv(args.outdir / "predictor_toy.csv", index=False)

@@ -5,9 +5,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.special import logsumexp
 
-from lenspin.bias.predictor import Model, laplace_posterior, log_z_from, profile_cell, q_weights, summary_of
+from lenspin.bias.predictor import Model, laplace_posterior, log_evidence, log_z_from, profile_cell, summary_of
 
 REFERENCE_SNR = 25.0
 SNRS = (8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 35.0, 50.0)
@@ -56,22 +55,46 @@ def run_cell(cell: dict) -> tuple[list[dict], list[dict]]:
     chis = list(dict.fromkeys(round(float(lam[2]), 2) for _, lam in fits))[:MAX_STARTS]
     solutions = profile_cell(model, data, tuple(chis), "aligned", MAP_Q) + profile_cell(model, data, (), "lensed", MAP_Q)
     sol = pd.DataFrame(solutions).assign(**cell)
-    aligned_all, lensed_all = sol[sol["kind"] == "aligned"], sol[sol["kind"] == "lensed"]
-    misfit = 0.5 * REFERENCE_SNR**2 - lensed_all["loglike"].max()
+    misfit = 0.5 * REFERENCE_SNR**2 - sol[sol["kind"] == "lensed"]["loglike"].max()
     best_row = {f"best_{k}": v for k, v in summary_of(best, model.truth).items()}
     best_row["best_ff"] = model.fitting_factor(data, np.exp(best[0]), best[1], best[2], best[2])
-    rows = []
+    rows = [{**cell, "snr": snr, "mchirp_true": float(np.exp(model.truth[0])), **post, "lens_misfit": misfit, **best_row}
+            for snr, post in posteriors(sol, misfit)]  # fmt: skip
+    return rows, sol.to_dict("records")
+
+
+def posteriors(sol: pd.DataFrame, misfit: float) -> list[tuple[float, dict]]:
+    """Aligned posterior and ln B(lensed vs aligned) at every SNR, from the fixed-q solutions of one cell."""
+    aligned_all, lensed_all = sol[sol["kind"] == "aligned"], sol[sol["kind"] == "lensed"]
+    out = []
     for snr in SNRS:
         s = snr / REFERENCE_SNR
         aligned = aligned_all.assign(log_z_s=[log_z_from(r, s) for r in aligned_all.to_dict("records")])
         lensed = lensed_all.assign(log_z_s=[log_z_from(r, s) for r in lensed_all.to_dict("records")])
         post = laplace_posterior(aligned, "log_z_s", var_scale=1.0 / s**2)
-        lnb = float(logsumexp(q_weights(lensed, "log_z_s"))) - post.pop("log_z")
-        rows.append({
-            **cell, "snr": snr, "mchirp_true": float(np.exp(model.truth[0])), **post,
-            "lnB_lensed_vs_aligned": lnb, "lnB_perfect_lens": lnb + s**2 * misfit, "lens_misfit": misfit, **best_row,
-        })  # fmt: skip
-    return rows, sol.to_dict("records")
+        lnb = log_evidence(lensed, "log_z_s", var_scale=1.0 / s**2) - post.pop("log_z")
+        out.append((snr, {**post, "lnB_lensed_vs_aligned": lnb, "lnB_perfect_lens": lnb + s**2 * misfit}))
+    return out
+
+
+def rederive_cell(task: tuple) -> list[dict]:
+    old, sol = (pd.DataFrame(x) for x in task)
+    old = old.set_index("snr")
+    return [{**old.loc[snr].to_dict(), "snr": snr, **post} for snr, post in posteriors(sol, old["lens_misfit"].iloc[0])]
+
+
+def rederive(outdir: Path, workers: int) -> None:
+    """Rebuild cells.csv from the stored solutions.csv, without refitting."""
+    summary_path = outdir / "cells.csv"
+    old, sol = pd.read_csv(summary_path), pd.read_csv(outdir / "solutions.csv")
+    keys = [k for k in (*KEYS, "chi_eff_true") if k in old.columns]
+    solutions = {k: g.to_dict("list") for k, g in sol.groupby(keys)}
+    tasks = [(g.to_dict("list"), solutions[k]) for k, g in old.groupby(keys)]
+    with ProcessPoolExecutor(workers) as pool:
+        rows = [r for cell_rows in pool.map(rederive_cell, tasks, chunksize=8) for r in cell_rows]
+    summary_path.rename(outdir / "cells_before_rederive.csv")
+    pd.DataFrame(rows)[list(old.columns)].to_csv(summary_path, index=False)
+    print(f"{len(tasks)} cells rederived", flush=True)
 
 
 def append(path: Path, rows: list[dict]) -> None:
@@ -87,8 +110,12 @@ def main() -> None:
     parser.add_argument("--dt-step", type=float, default=1.0, help="keep every n-th delay of DT_MS")
     parser.add_argument("--dense", action="store_true", help="use DENSE_FLUXES instead of FLUXES")
     parser.add_argument("--optics", nargs="*", choices=OPTICS, default=list(OPTICS))
+    parser.add_argument("--rederive", action="store_true", help="rebuild cells.csv from solutions.csv")
     args = parser.parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
+    if args.rederive:
+        rederive(args.outdir, args.workers)
+        return
     summary_path, solutions_path = args.outdir / "cells.csv", args.outdir / "solutions.csv"
     done = set()
     if summary_path.exists():

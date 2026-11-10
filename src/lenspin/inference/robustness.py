@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.stats import norm
 
 from lenspin.bias.maps import REFERENCE_SNR, injection
-from lenspin.bias.predictor import Model, log_z_from
+from lenspin.bias.predictor import Model, log_z_from, spin_prior_correction
 from lenspin.inference.pe import APPROXIMANT, STUDIES
 from lenspin.inference.pe_posteriors import summarise
 
@@ -62,7 +62,7 @@ def mode_competition(solutions: pd.DataFrame) -> pd.DataFrame:
         g = solutions[(solutions["kind"] == "aligned") & (solutions["optics"] == cell["optics"])]
         for k in ("total_mass", "q_true", "flux", "dt_ms"):
             g = g[np.isclose(g[k], cell[k])]
-        g = g.assign(log_z_s=[log_z_from(r, s) for r in g.to_dict("records")])
+        g = g.assign(log_z_s=[log_z_from(r, s) + spin_prior_correction(r, 1.0 / s**2) for r in g.to_dict("records")])
         best = [b.loc[b["log_z_s"].idxmax()] for b in (g[g["q"] < 0.5], g[g["q"] >= 0.5])]
         a, b = sorted(best, key=lambda r: -r["log_z_s"])
         model = Model(injection(cell), "xp", REFERENCE_SNR, cell["optics"])
