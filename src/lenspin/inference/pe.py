@@ -61,6 +61,9 @@ STUDIES["noise_scan"] = [{**SCAN[dt], "noise_seed": seed} for dt in (12.5, 14.5)
 STUDIES["inclination"] = [{**inj, "cosi": cosi} for inj in (HIDDEN_180, SCAN[12.5], SCAN[20.5]) for cosi in (0.2, 0.95)]
 STUDIES["waveform"] = [{**inj, "approximant": "IMRPhenomXO4a"} for inj in (HIDDEN_180, SCAN[10.5], SCAN[20.5])]
 STUDIES["network_wide"] = [{**inj, "mchirp_span": (0.4, 1.6)} for inj in STUDIES["network"]]
+STUDIES["network_xo4a"] = [{**inj, "approximant": "IMRPhenomXO4a"} for inj in STUDIES["network_wide"]]
+NRSUR_MODES = [[2, 2], [2, 1], [2, 0], [2, -1], [2, -2]]
+STUDIES["nrsur"] = [{**SCAN[dt], "approximant": "NRSur7dq4", "mode_array": NRSUR_MODES} for dt in (10.5, 20.5)]
 STUDY_MODELS = {
     "network": ("precessing", "lensed", "aligned"),
     "generality": ("precessing", "aligned"),
@@ -71,6 +74,8 @@ STUDY_MODELS = {
     "inclination": ("precessing", "aligned"),
     "waveform": ("precessing", "aligned"),
     "network_wide": ("precessing", "lensed", "aligned"),
+    "network_xo4a": ("precessing", "aligned"),
+    "nrsur": ("precessing", "aligned"),
 }
 INJECTIONS = STUDIES["network"]
 MODELS = ("aligned", "precessing", "lensed")
@@ -150,11 +155,15 @@ def lensed_bbh_relative_binning(frequency_array, mass_1, mass_2, luminosity_dist
 
 
 def waveform_arguments(inj: dict | None = None) -> dict:
-    return {
-        "waveform_approximant": (inj or {}).get("approximant", APPROXIMANT),
+    inj = inj or {}
+    args = {
+        "waveform_approximant": inj.get("approximant", APPROXIMANT),
         "reference_frequency": F_REF,
         "minimum_frequency": F_MIN_DEFAULT,
     }
+    if "mode_array" in inj:
+        args["mode_array"] = inj["mode_array"]
+    return args
 
 
 def segment_duration(inj: dict) -> float:
