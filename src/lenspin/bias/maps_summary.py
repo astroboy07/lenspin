@@ -21,8 +21,8 @@ INK, MUTED = "#0b0b0b", "#898781"
 
 
 def flags(cells: pd.DataFrame) -> pd.DataFrame:
-    """A cell is biased when the 90% interval excludes the truth in chi_eff or q (q = 1 sits on the prior
-    edge, so there the upper bound must fall below Q_ONE_EDGE). Hidden means ln B(lensed vs aligned),
+    """A cell is biased when the 90% interval excludes the truth in chi_eff, q or chirp mass (q = 1 sits on the
+    prior edge, so there the upper bound must fall below Q_ONE_EDGE). Hidden means ln B(lensed vs aligned),
     for a lensed template that fits perfectly, is below the threshold."""
     q_one = cells["q_true"] >= 1.0
     q_biased = np.where(q_one, cells["q_hi"] < Q_ONE_EDGE,
@@ -32,7 +32,7 @@ def flags(cells: pd.DataFrame) -> pd.DataFrame:
         q_biased=q_biased,
         mchirp_biased=(cells["mchirp_lo"] > cells["mchirp_true"]) | (cells["mchirp_hi"] < cells["mchirp_true"]),
     )
-    out["biased"] = out["chi_biased"] | out["q_biased"]
+    out["biased"] = out["chi_biased"] | out["q_biased"] | out["mchirp_biased"]
     out["dt_over_m"] = out["dt_ms"] / (out["total_mass"] * MTSUN_MS)
     for level in HIDDEN:
         out[f"danger_{level:g}"] = out["biased"] & (out["lnB_perfect_lens"] < level)
@@ -43,7 +43,8 @@ def tables(cells: pd.DataFrame) -> None:
     group = cells.groupby(["optics", "total_mass", "q_true", "snr"])
     summary = group.agg(
         cells=("biased", "size"), biased=("biased", "mean"), chi_biased=("chi_biased", "mean"),
-        q_biased=("q_biased", "mean"), danger_3=("danger_3", "mean"), danger_8=("danger_8", "mean"),
+        q_biased=("q_biased", "mean"), mchirp_biased=("mchirp_biased", "mean"), danger_3=("danger_3", "mean"),
+        danger_8=("danger_8", "mean"),
     )  # fmt: skip
     with pd.option_context("display.width", 200, "display.max_rows", 400):
         print(summary.round(3).to_string())
