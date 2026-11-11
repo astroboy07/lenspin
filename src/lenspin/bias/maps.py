@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lenspin.bias.predictor import Model, laplace_posterior, log_evidence, log_z_from, profile_cell, summary_of
+from lenspin.bias.predictor import (LENSED_AT_FIXED_Q, Model, laplace_posterior, log_evidence, log_z_from, profile_cell,
+                                    summary_of)
 
 REFERENCE_SNR = 25.0
 SNRS = (8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 35.0, 50.0)
@@ -97,6 +98,36 @@ def rederive(outdir: Path, workers: int) -> None:
     print(f"{len(tasks)} cells rederived", flush=True)
 
 
+def lens_variance_cell(task: tuple) -> list[dict]:
+    """Lens delay and flux-ratio variances of the stored lensed solutions of one cell, and the loglike change."""
+    cell, rows = task
+    model = Model(injection(cell), "xp", REFERENCE_SNR, cell["optics"])
+    out = []
+    for r in rows:
+        eta = r["q"] / (1 + r["q"]) ** 2
+        lam = np.array([r["log_mchirp"], eta, r["chi_eff"], r["tc"], r["phic"], r["log_amp"], r["lens_dt"], r["lens_flux"]])
+        terms = model.laplace_terms(model.lensed, lam, LENSED_AT_FIXED_Q)
+        out.append({"row": r["row"], "var_lens_dt": terms["var_lens_dt"], "var_lens_flux": terms["var_lens_flux"],
+                    "d_loglike": terms["loglike"] - r["loglike"]})  # fmt: skip
+    return out
+
+
+def lens_variances(outdir: Path, workers: int) -> None:
+    """Add the lens variances to the lensed rows of solutions.csv (kept as solutions_before_lens_box.csv)."""
+    path = outdir / "solutions.csv"
+    sol = pd.read_csv(path).reset_index(names="row")
+    keys = [k for k in (*KEYS, "chi_eff_true") if k in sol.columns]
+    lensed = sol[sol["kind"] == "lensed"]
+    tasks = [(dict(zip(keys, k)), g.to_dict("records")) for k, g in lensed.groupby(keys)]
+    with ProcessPoolExecutor(workers) as pool:
+        found = pd.DataFrame([r for rows in pool.map(lens_variance_cell, tasks, chunksize=4) for r in rows])
+    print(f"{len(found)} lensed solutions, max |d loglike| {found['d_loglike'].abs().max():.2e}", flush=True)
+    sol = sol.drop(columns=[c for c in ("var_lens_dt", "var_lens_flux") if c in sol.columns])
+    sol = sol.merge(found.drop(columns="d_loglike"), on="row", how="left").drop(columns="row")
+    path.rename(outdir / "solutions_before_lens_box.csv")
+    sol.to_csv(path, index=False)
+
+
 def append(path: Path, rows: list[dict]) -> None:
     pd.DataFrame(rows).to_csv(path, mode="a", header=not path.exists(), index=False)
 
@@ -111,8 +142,12 @@ def main() -> None:
     parser.add_argument("--dense", action="store_true", help="use DENSE_FLUXES instead of FLUXES")
     parser.add_argument("--optics", nargs="*", choices=OPTICS, default=list(OPTICS))
     parser.add_argument("--rederive", action="store_true", help="rebuild cells.csv from solutions.csv")
+    parser.add_argument("--lens-variances", action="store_true", help="add lens variances to solutions.csv")
     args = parser.parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
+    if args.lens_variances:
+        lens_variances(args.outdir, args.workers)
+        return
     if args.rederive:
         rederive(args.outdir, args.workers)
         return

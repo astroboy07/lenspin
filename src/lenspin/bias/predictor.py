@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import quad
 from scipy.optimize import minimize_scalar
-from scipy.special import logsumexp
+from scipy.special import logsumexp, ndtr
 
 from lenspin.inference.pe import DT_MAX, Q_MIN, SPIN_MAX, STUDIES, make_ifos, segment_duration
 from lenspin.models.network import F_MAX, F_MIN_DEFAULT, PSD_MODELS, UPSAMPLE, FrequencyGrid, noise_weights
@@ -55,6 +55,7 @@ CHI_NODES = 81
 CHI_SIGMAS = 5.0
 CHI_EDGE = 0.985
 VARIANCES = ("var_log_mchirp", "var_chi", "cov_log_mchirp_chi")
+LENS_BOX = {"lens_dt": (0.0, DT_MAX), "lens_flux": (0.0, 1.0)}
 
 
 def eta_to_q(eta: float) -> float:
@@ -174,7 +175,22 @@ def log_z_from(terms: dict, snr_scale: float = 1.0) -> float:
     return float(
         s2 * terms["loglike"] + 0.5 * k * np.log(2 * np.pi) - 0.5 * (terms["logdet"] + k * np.log(s2))
         + log_spin_integral(terms["chi_eff"], terms["q"], s2 * terms["grad"], s2 * terms["curv"]) + terms["prior"]
+        + log_lens_box(terms, s2)
     )  # fmt: skip
+
+
+def log_lens_box(terms: dict, s2: float = 1.0) -> float:
+    """Log of the Gaussian mass of the lens delay and flux ratio inside their prior ranges, as a product of the
+    marginal masses (0 for the aligned model and for solutions without stored lens variances)."""
+    total = 0.0
+    for name, (lo, hi) in LENS_BOX.items():
+        var = terms.get(f"var_{name}", np.nan)
+        if not np.isfinite(var) or var <= 0:
+            continue
+        sigma = np.sqrt(var / s2)
+        mass = ndtr((hi - terms[name]) / sigma) - ndtr((lo - terms[name]) / sigma)
+        total += np.log(max(mass, 1e-300))
+    return float(total)
 
 
 def log_prior_q(q: np.ndarray) -> np.ndarray:
@@ -363,12 +379,16 @@ class Model:
         gamma = self.fisher(d)
         grad, curv, _, _ = self.spin_direction(data, lam, d, gamma)
         cov = np.linalg.inv(gamma)
-        return {
+        terms = {
             "q": eta_to_q(lam[1]), "chi_eff": float(lam[2]), "nfree": len(free),
             "loglike": float(self.inner(data, h) - 0.5 * self.inner(h, h)),
             "logdet": float(np.linalg.slogdet(gamma)[1]), "grad": grad, "curv": curv, "prior": log_prior(lam),
             "var_log_mchirp": cov[0, 0], "var_chi": cov[1, 1], "cov_log_mchirp_chi": cov[0, 1],
         }  # fmt: skip
+        for index, name in ((6, "lens_dt"), (7, "lens_flux")):
+            if index in free:
+                terms[name], terms[f"var_{name}"] = float(lam[index]), cov[free.index(index), free.index(index)]
+        return terms
 
     def importance(self, data: np.ndarray, lam: np.ndarray, rng: np.random.Generator) -> dict:
         """Importance-sampled log evidence at fixed q over (log_mchirp, chi, tc, phic, log_amp, u)."""
