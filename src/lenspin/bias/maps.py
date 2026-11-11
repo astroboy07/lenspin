@@ -106,7 +106,11 @@ def lens_variance_cell(task: tuple) -> list[dict]:
     for r in rows:
         eta = r["q"] / (1 + r["q"]) ** 2
         lam = np.array([r["log_mchirp"], eta, r["chi_eff"], r["tc"], r["phic"], r["log_amp"], r["lens_dt"], r["lens_flux"]])
-        terms = model.laplace_terms(model.lensed, lam, LENSED_AT_FIXED_Q)
+        try:
+            terms = model.laplace_terms(model.lensed, lam, LENSED_AT_FIXED_Q)
+        except np.linalg.LinAlgError:
+            out.append({"row": r["row"], "var_lens_dt": np.nan, "var_lens_flux": np.nan, "d_loglike": np.nan})
+            continue
         out.append({"row": r["row"], "var_lens_dt": terms["var_lens_dt"], "var_lens_flux": terms["var_lens_flux"],
                     "d_loglike": terms["loglike"] - r["loglike"]})  # fmt: skip
     return out
@@ -121,7 +125,8 @@ def lens_variances(outdir: Path, workers: int) -> None:
     tasks = [(dict(zip(keys, k)), g.to_dict("records")) for k, g in lensed.groupby(keys)]
     with ProcessPoolExecutor(workers) as pool:
         found = pd.DataFrame([r for rows in pool.map(lens_variance_cell, tasks, chunksize=4) for r in rows])
-    print(f"{len(found)} lensed solutions, max |d loglike| {found['d_loglike'].abs().max():.2e}", flush=True)
+    print(f"{len(found)} lensed solutions, {int(found['d_loglike'].isna().sum())} singular (kept untruncated), "
+          f"max |d loglike| {found['d_loglike'].abs().max():.2e}", flush=True)
     sol = sol.drop(columns=[c for c in ("var_lens_dt", "var_lens_flux") if c in sol.columns])
     sol = sol.merge(found.drop(columns="d_loglike"), on="row", how="left").drop(columns="row")
     path.rename(outdir / "solutions_before_lens_box.csv")
